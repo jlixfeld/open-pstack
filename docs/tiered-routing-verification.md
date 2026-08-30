@@ -10,7 +10,7 @@ This record summarizes the live evidence for the tiered model routing candidate.
 | `codex:gpt-5.6-luna@high` | Codex native | Pass | Exact assigned native task and marker | Not exposed | Not exposed | Not exposed |
 | `codex:gpt-5.6-terra@high` | Codex native | Pass | Exact assigned native task and marker | Not exposed | Not exposed | Not exposed |
 | `codex:gpt-5.6-sol@max` | Codex native | Pass | Exact assigned native task and marker | Not exposed | Not exposed | Not exposed |
-| `claude:claude-opus-5@xhigh` | Codex external | Pass | Provider reported `claude-opus-5` | 10,223 ms | input 4, cache read 30,140, cache create 27,139, output 513 | $0.300351 |
+| `claude:claude-opus-5@xhigh` | Codex external | Pass | Provider reported `claude-opus-5` | 6,374 ms | input 4, cache read 30,143, cache create 27,243, output 294 | $0.295938 |
 
 Fable and Grok were not probed because neither family appears in the initial active role map. No probe substituted a model or effort.
 
@@ -20,12 +20,12 @@ The Claude-parent panel loaded the candidate with `--plugin-dir`. Terra and Sol 
 
 | Claude-parent lane | Route | Result | Elapsed | Usage | Cost |
 | --- | --- | --- | ---: | --- | ---: |
-| Terra high | External Codex | Pass | 10,278 ms | input 35,889, cache read 27,136, output 260, reasoning 123 | Not exposed |
-| Sol max | External Codex | Pass | 12,763 ms | input 36,356, cache read 17,152, output 255, reasoning 102 | Not exposed |
-| Opus xhigh | Native Claude | Pass | Not exposed per lane | Not exposed per lane | Not exposed per lane |
-| Sol max judge | External Codex | Pass | 41,653 ms | input 83,238, cache read 58,624, output 1,518, reasoning 860 | Not exposed |
+| Terra high | External Codex | Pass | 9,332 ms | input 38,378, cache read 17,152, output 234, reasoning 85 | Not exposed |
+| Sol max | External Codex | Pass | 13,708 ms | input 38,484, cache read 17,152, output 433, reasoning 276 | Not exposed |
+| Opus xhigh | Native Claude | Pass | 4,150 ms | 33,815 total subagent tokens | Not exposed per lane |
+| Sol max judge | External Codex | Pass | 28,406 ms | input 40,097, cache read 27,136, output 1,040, reasoning 572 | Not exposed |
 
-The successful Claude parent orchestration took 158,117 ms and reported $1.695355 aggregate cost. A later rerun after the final review fixes did not start a lane because Anthropic returned the account session limit. That dropout used no tokens or cost and did not trigger a fallback. The final fixes affect setup path canonicalization, tests, and documentation. They do not change the panel descriptors or parent route table. The repository gate still requires a successful exact-final-candidate Claude-parent rerun before the pull request can leave draft state.
+The exact-final Claude-parent orchestration loaded commit `002a881a366c6b058e6de28bee69935e04a75582`, took 200,913 ms, and reported $1.906730 aggregate cost. All three lanes returned in configured order, the independent judge passed, and no lane dropped out or substituted a model. This successful run supersedes the earlier session-limit dropout.
 
 The Codex-parent panel used native Terra and Sol tasks plus the external Opus runner. Its independent Opus judge returned `JUDGE_VERDICT: PASS`.
 
@@ -40,7 +40,7 @@ After the final fixes, Codex installed version `1.2.0` from the fork checkout as
 
 ## Review and verification
 
-Sol and Opus ran independent adversarial reviews. Accepted findings covered nested-working-directory upstream comparison, family-specific runner validation, target snapshot races, rollback behavior, Claude include canonicalization, role-parser failure handling, workflow-consumer drift checks, and documentation accuracy. A proposed TypeScript rewrite of the Markdown schema was dismissed because the existing Markdown manifest remains the shared human-readable source and exact alignment tests now bind its consumers. Positional probe matching remains intentionally strict because accepting a reordered receipt set would weaken the exact final-map contract.
+Sol and Opus ran independent adversarial reviews. Accepted findings covered nested-working-directory upstream comparison, family-specific runner validation, target snapshot races, rollback behavior, Claude include canonicalization, role-parser failure handling, workflow-consumer drift checks, and documentation accuracy. The final Opus xhigh rereview passed all four previously open areas against commit `002a881a366c6b058e6de28bee69935e04a75582` in 400,187 ms with provider-reported `claude-opus-5`, 28,785 output tokens, and $3.209149 cost. A proposed TypeScript rewrite of the Markdown schema was dismissed because the existing Markdown manifest remains the shared human-readable source and exact alignment tests now bind its consumers. Positional probe matching remains intentionally strict because accepting a reordered receipt set would weaken the exact final-map contract.
 
 The final local gate passed:
 
