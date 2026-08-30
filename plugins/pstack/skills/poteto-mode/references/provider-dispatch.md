@@ -41,11 +41,13 @@ one lane. A `panel` launches every stored lane in order, including repeats. A
 | how critics | panel | codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
 | why investigators, synthesizer | panel | inherit-parent |
 | reflect tooling, judgment, divergent, synthesizer | panel | inherit-parent |
-| arena runners | panel | codex:gpt-5.6-terra@high, codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
+| arena runners | panel | codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
 | arena cross-judge pool | pool | codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
 | swarm workers | single | codex:gpt-5.6-luna@high |
-| architect runners | panel | codex:gpt-5.6-terra@high, codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
+| architect runners | panel | codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
 | interrogate reviewers | panel | codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
+
+Comparative first-run panels use one model per active provider. Sol represents OpenAI and Opus represents Anthropic. Add Grok once when xAI is active. Add another model from the same provider only as an explicit repeated lane. Specialized single roles still use Terra or Luna where their lower-cost profile fits the work.
 
 ## The parent owns the route
 

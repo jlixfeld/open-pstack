@@ -298,9 +298,9 @@ describe("model matrix", () => {
     }
     const expectedPanels = new Map([
       ["how critics", "codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
-      ["arena runners", "codex:gpt-5.6-terra@high, codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
+      ["arena runners", "codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
       ["arena cross-judge pool", "codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
-      ["architect runners", "codex:gpt-5.6-terra@high, codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
+      ["architect runners", "codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
       ["interrogate reviewers", "codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
     ]);
     for (const role of PANEL_ROLES) {

@@ -38,6 +38,14 @@ describe("routing manifest", () => {
     expect(roles.find((role) => role.role === "refactoring implementation")?.lanes.map(renderLane)).toEqual(["codex:gpt-5.6-luna@high"]);
     expect(probePlan(roles).map(renderLane)).not.toContain("claude:claude-fable-5@max");
     expect(probePlan(roles).map(renderLane)).not.toContain("grok:grok-4.6@xhigh");
+    for (const roleName of ["arena runners", "architect runners"]) {
+      const lanes = roles.find((role) => role.role === roleName)?.lanes ?? [];
+      expect(lanes.map(renderLane)).toEqual([
+        "codex:gpt-5.6-sol@max",
+        "claude:claude-opus-5@xhigh",
+      ]);
+      expect(new Set(lanes.map((lane) => renderLane(lane).split(":", 1)[0])).size).toBe(lanes.length);
+    }
   });
 
   it("migrates the one unambiguous legacy combined role into two rows", () => {

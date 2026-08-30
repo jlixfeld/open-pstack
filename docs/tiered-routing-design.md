@@ -25,10 +25,10 @@ how explainer: claude:claude-opus-5@xhigh
 how critics: codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh
 why investigators, synthesizer: inherit-parent
 reflect tooling, judgment, divergent, synthesizer: inherit-parent
-arena runners: codex:gpt-5.6-terra@high, codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh
+arena runners: codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh
 arena cross-judge pool: codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh
 swarm workers: codex:gpt-5.6-luna@high
-architect runners: codex:gpt-5.6-terra@high, codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh
+architect runners: codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh
 interrogate reviewers: codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh
 ```
 
