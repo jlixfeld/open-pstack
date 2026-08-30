@@ -339,6 +339,10 @@ describe("model matrix", () => {
     ].join("\n"));
     const swarm = readFileSync(join(PLUGIN_ROOT, "skills/swarm/SKILL.md"), "utf8");
     expect(swarm).toContain(`Otherwise use ${consumer("swarm workers")[0]}.`);
+    const reference = readFileSync(join(PLUGIN_ROOT, "../../docs/reference.md"), "utf8");
+    expect(reference).toContain(
+      `Initial Arena and Architect panels use ${consumer("arena runners").join(", ")}, one model per active provider. How critics and Interrogate use ${consumer("how critics").join(", ")}.`
+    );
   });
 
   it("keeps setup's fail-closed reconfiguration order", () => {

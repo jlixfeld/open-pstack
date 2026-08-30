@@ -194,7 +194,7 @@ The port is editorial, not mechanical. Anywhere upstream pstack assumed Cursor-s
 | Cursor's `/goal` (standing objective across turns) | The program objective written into the run's standing orders and restated in the todolist |
 | The Cursor agent store (path in the system prompt) | `~/.claude/orchestrate/<project-slug>/`, which survives the session restarts a multi-day program expects |
 | Model rule `~/.cursor/rules/pstack-models.mdc` | Override sheet `~/.claude/pstack-models.md`, included from `CLAUDE.md` |
-| Multi-model panels (arena, architect, interrogate, how-critics) | Provider dispatch preserves each role's ordered lanes. Initial Arena and Architect panels are Terra high, Sol max, and Opus xhigh; How critics and Interrogate use Sol max plus Opus xhigh. Same-provider lanes stay native; cross-parent lanes use the bundled runner. |
+| Multi-model panels (arena, architect, interrogate, how-critics) | Provider dispatch preserves each role's ordered lanes. Initial Arena and Architect panels use `codex:gpt-5.6-sol@max`, `claude:claude-opus-5@xhigh`, one model per active provider. How critics and Interrogate use `codex:gpt-5.6-sol@max`, `claude:claude-opus-5@xhigh`. Terra high remains the feature-implementation model. Same-provider lanes stay native; cross-parent lanes use the bundled runner. |
 
 ### Cross-vendor dispatch
 
