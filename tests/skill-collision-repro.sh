@@ -45,63 +45,28 @@ else
   fail=1
 fi
 
-# Static invariant (CHANGES maintenance note): provider-dispatch owns the default
-# provider/model quad and the four panel skills plus setup-pstack copy it verbatim.
 setup="$repo/plugins/pstack/skills/setup-pstack/SKILL.md"
 dispatch="$repo/plugins/pstack/skills/poteto-mode/references/provider-dispatch.md"
-quad_of() { { grep -oE '(claude|codex|grok):[a-z0-9.-]+@(low|medium|high|xhigh|max)' || true; } | tr '\n' ' ' | sed 's/ $//'; }
-canon_quad="$(awk '
-  $0 == "## Model matrix" { in_matrix = 1; next }
-  in_matrix && /^## / { exit }
-  in_matrix && /^\|/ {
-    line = $0
-    sub(/^\|/, "", line)
-    sub(/\|$/, "", line)
-    n = split(line, cells, "|")
-    for (i = 1; i <= n; i++) {
-      gsub(/^ +| +$/, "", cells[i])
-      gsub(/`/, "", cells[i])
-    }
-    family = cells[1]
-    if (family == "Family" || family ~ /^:?-+:?$/) next
-    provider = cells[3]
-    model = cells[4]
-    effort = cells[5]
-    if (out != "") out = out " "
-    out = out provider ":" model "@" effort
-  }
-  END { print out }
-' "$dispatch")"
-quad_bad=""
-[ -n "$canon_quad" ] || quad_bad="could not read the canonical quad from $dispatch"$'\n'
-# Anchor on the quad's last slug rather than a hard-coded one, so a model swap in
-# setup-pstack cannot leave this check hunting for a slug nobody ships any more.
-anchor="${canon_quad##* }"
-# arena, architect, and how each state the quad on one line; interrogate lists it
-# as one slug per row of its Reviewer A/B/C/D table (upstream #167).
-for name in arena architect how; do
-  skill="$repo/plugins/pstack/skills/$name/SKILL.md"
-  n="$(grep -Fc "$anchor" "$skill" || true)"
-  if [ "$n" != "1" ]; then
-    quad_bad="$quad_bad$skill: expected exactly 1 default-quad line, found $n"$'\n'
-    continue
-  fi
-  got="$(grep -F "$anchor" "$skill" | quad_of)"
-  [ "$got" = "$canon_quad" ] || quad_bad="$quad_bad$skill: [$got] != [$canon_quad]"$'\n'
-done
-interrogate="$repo/plugins/pstack/skills/interrogate/SKILL.md"
-got="$(grep -E '^\| Reviewer [A-Z] \|' "$interrogate" | quad_of)"
-[ "$got" = "$canon_quad" ] || quad_bad="$quad_bad$interrogate reviewer table: [$got] != [$canon_quad]"$'\n'
-while IFS= read -r line; do
-  got="$(printf '%s\n' "$line" | quad_of)"
-  [ "$got" = "$canon_quad" ] || quad_bad="$quad_bad$setup role row: [$got] != [$canon_quad]"$'\n'
-done < <(grep -E '^(arena runners|arena cross-judge pool|architect runners|interrogate reviewers|how critics):' "$setup")
-if [ -n "$quad_bad" ]; then
-  note "FAIL: the default model quad is not identical across provider dispatch, the panel skills, and setup-pstack:"
-  note "$quad_bad"
+route_bad=""
+grep -Fq '| feature implementation | single | codex:gpt-5.6-terra@high |' "$dispatch" || route_bad="missing Terra feature role"$'\n'
+grep -Fq '| refactoring implementation | single | codex:gpt-5.6-luna@high |' "$dispatch" || route_bad="missing Luna refactoring role"$'\n'
+grep -Fq '| arena cross-judge pool | pool |' "$dispatch" || route_bad="cross-judge is not a pool"$'\n'
+grep -Fq 'feature implementation: codex:gpt-5.6-terra@high' "$setup" || route_bad="setup misses split feature role"$'\n'
+grep -Fq 'refactoring implementation: codex:gpt-5.6-luna@high' "$setup" || route_bad="setup misses split refactoring role"$'\n'
+if [ -n "$route_bad" ]; then
+  note "FAIL: the routing registry and setup example drifted:"
+  note "$route_bad"
   fail=1
 else
-  note "ok: default model quad identical across provider dispatch + 4 panel skills + setup-pstack ($canon_quad)"
+  note "ok: routing registry and setup example preserve the split roles and pool"
+fi
+
+monitor="$repo/.github/workflows/cursor-pstack-monitor.yml"
+if grep -Fq 'ref: ${{ github.event.repository.default_branch }}' "$monitor"; then
+  note "ok: manual upstream monitoring reconciles from the default branch"
+else
+  note "FAIL: upstream monitoring can reconcile repository issues from a non-default branch"
+  fail=1
 fi
 
 plugin="$repo/plugins/pstack"

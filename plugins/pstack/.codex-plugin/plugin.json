@@ -5,8 +5,8 @@
   "author": {
     "name": "Lauren Tan"
   },
-  "homepage": "https://github.com/ericlitman/open-pstack",
-  "repository": "https://github.com/ericlitman/open-pstack",
+  "homepage": "https://github.com/jlixfeld/open-pstack",
+  "repository": "https://github.com/jlixfeld/open-pstack",
   "license": "MIT",
   "keywords": [
     "pstack",
@@ -33,7 +33,7 @@
       "Work on this in poteto-mode.",
       "Interrogate this diff with multiple models."
     ],
-    "websiteURL": "https://github.com/ericlitman/open-pstack",
+    "websiteURL": "https://github.com/jlixfeld/open-pstack",
     "brandColor": "#7C3AED"
   }
 }

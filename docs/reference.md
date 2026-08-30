@@ -2,7 +2,7 @@
 
 This page contains the full skill, dependency, runtime, and porting reference. For the plain-English introduction and quick start, see the [main README](../README.md).
 
-[Poteto](https://x.com/poteto)'s [pstack](https://github.com/cursor/plugins/tree/main/pstack), adapted to run in Claude Code and Codex without Cursor. One shared skill tree serves both harnesses; Grok remains available as a model-provider lane. Version 1.2.0 is synced to Cursor pstack v0.14.3 at `bdf7aa355337897f167153e05069aca505dae17c`. See [UPSTREAM.md](../UPSTREAM.md) for the exact sync contract.
+[Poteto](https://x.com/poteto)'s [pstack](https://github.com/cursor/plugins/tree/main/pstack), adapted to run in Claude Code and Codex without Cursor. One shared skill tree serves both harnesses; Fable, Sol, Terra, Luna, Grok, and Opus are provider-qualified model families. Version 1.2.0 is synced to Cursor pstack v0.14.3 at `bdf7aa355337897f167153e05069aca505dae17c`. See [UPSTREAM.md](../UPSTREAM.md) for the exact sync contract.
 
 Original by Lauren Tan. This distribution builds on Michael Denyer's [pstack-claude](https://github.com/michael-denyer/pstack-claude) port and retains its history and MIT attribution. It imports seven MIT-licensed skills from [cursor-team-kit](https://github.com/cursor/plugins/tree/main/cursor-team-kit): `deslop`, `thermo-nuclear-code-quality-review`, `make-pr-easy-to-review`, `fix-ci`, `fix-merge-conflicts`, `get-pr-comments`, `what-did-i-get-done`.
 
@@ -17,7 +17,7 @@ This is not a verbatim copy. Skill bodies have been edited so every Cursor-speci
 This repo ships as a Claude Code marketplace containing one plugin (`pstack`).
 
 ```text
-/plugin marketplace add ericlitman/open-pstack
+/plugin marketplace add jlixfeld/open-pstack
 /plugin install pstack@open-pstack
 /reload-plugins
 ```
@@ -29,7 +29,7 @@ The plugin auto-fires through a `SessionStart` hook on startup, `/clear`, and po
 The same plugin carries a `.codex-plugin/plugin.json` manifest and a root `.agents/plugins/marketplace.json`. Install it through the Codex marketplace:
 
 ```shell
-codex plugin marketplace add ericlitman/open-pstack --ref main
+codex plugin marketplace add jlixfeld/open-pstack --ref main
 codex plugin add pstack@open-pstack
 ```
 
@@ -43,7 +43,7 @@ multi_agent = true
 For local plugin development, you can clone the repository and link its skills directly:
 
 ```shell
-git clone https://github.com/ericlitman/open-pstack
+git clone https://github.com/jlixfeld/open-pstack
 cd open-pstack
 for s in plugins/pstack/skills/*/; do ln -s "$PWD/$s" ~/.agents/skills/"$(basename "$s")"; done
 ```
@@ -86,9 +86,9 @@ The Codex build shares one `skills/` tree with the Claude Code build. Nothing is
 - **Tool and built-in mapping.** Claude tool names and built-in skills resolve through [`codex-tools.md`](../plugins/pstack/skills/poteto-mode/references/codex-tools.md). Model execution resolves separately through [`provider-dispatch.md`](../plugins/pstack/skills/poteto-mode/references/provider-dispatch.md), so Codex can keep Sol native while invoking Claude and Grok externally.
 - **Subagents.** The `Agent` tool maps to Codex `spawn_agent` / `wait_agent`, enabled by `multi_agent = true`. Parallel fan-out is multiple `spawn_agent` calls in one turn. If the native Codex lane is unavailable, record that lane as a dropout; external Claude and Grok lanes still run, and no provider is silently substituted. There is no `poteto-agent` subagent type on Codex; route ad-hoc subagents by dispatching a `spawn_agent` told to read `poteto-mode` first.
 - **Auto-fire.** The `hooks/` SessionStart injection is Claude Code-only; Codex has no plugin hook runtime. Enter `pstack:poteto-mode` by name, or add a standing instruction to `~/.codex/AGENTS.md` if you want the same always-on routing.
-- **Models.** `/setup-pstack` writes provider-qualified descriptors and asks one requested effort per frontier family (`low`, `medium`, `high`, `xhigh`, `max`). The first-run panel is Fable 5 max, GPT-5.6 Sol max, Grok 4.6 xhigh, and Opus 5 xhigh. A rerun keeps each role's family and rewrites that family's effort. In Codex, Sol uses native `spawn_agent`; Claude and Grok use the deterministic external runner. In Claude Code, Fable and Opus use native agents; Sol and Grok use the runner. Children never detect the parent or reroute themselves.
+- **Models.** `/setup-pstack` writes provider-qualified per-role descriptors. Fable, Sol, Terra, Luna, Grok, and Opus support their matrix-defined efforts; Sol and Terra also allow `ultra`. The initial map separates Terra-high feature work from Luna-high refactoring. Arena and Architect use one Sol lane and one Opus lane, one model per active provider. The cross-judge pool also contains Sol and Opus. A rerun preserves exact role lanes and probes only unique final-map descriptors. In Codex, Codex descriptors use native `spawn_agent`; Claude and Grok use the deterministic external runner. In Claude Code, Claude descriptors use native agents; Codex and Grok use the runner. Children never detect the parent or reroute themselves.
 
-Verified in fresh installed Claude Code and Codex sessions: the user-facing skills are discovered and namespaced under `pstack`; both parents fan out the frontier quad through the documented native/external route table, retain long-running handles without a default timeout, and cross-judge only after every candidate is terminal. The `principle-*` leaves remain available for `poteto-mode` to read by path. Claude honors their `user-invocable: false` metadata; Codex 0.149.0 does not ([#8](https://github.com/ericlitman/open-pstack/issues/8)).
+Verified in fresh installed Claude Code and Codex sessions: the user-facing skills are discovered and namespaced under `pstack`; both parents preserve configured ordered lanes through the documented native/external route table, retain long-running handles without a default timeout, and cross-judge only after every candidate is terminal. The `principle-*` leaves remain available for `poteto-mode` to read by path. Claude honors their `user-invocable: false` metadata; Codex 0.149.0 does not ([#8](https://github.com/ericlitman/open-pstack/issues/8)).
 
 ## Dependencies
 
@@ -126,7 +126,7 @@ The table uses the short upstream names. Claude Code exposes each native skill w
 | `/why` | investigate why something was built this way (parallel multi-MCP evidence) |
 | `/architect` | settle types and module shape before writing code that crosses a function boundary |
 | `/arena` | run N parallel attempts at the same task and pick the best parts |
-| `/interrogate` | have four different models try to break a diff |
+| `/interrogate` | have independently routed models try to break a diff |
 | `/automate-me` | draft your own personal -mode skill from recent transcripts |
 | `/reflect` | capture a long task's lessons as a skill edit |
 | `/tdd` | fix a bug by writing the failing test first, then the fix |
@@ -194,7 +194,7 @@ The port is editorial, not mechanical. Anywhere upstream pstack assumed Cursor-s
 | Cursor's `/goal` (standing objective across turns) | The program objective written into the run's standing orders and restated in the todolist |
 | The Cursor agent store (path in the system prompt) | `~/.claude/orchestrate/<project-slug>/`, which survives the session restarts a multi-day program expects |
 | Model rule `~/.cursor/rules/pstack-models.mdc` | Override sheet `~/.claude/pstack-models.md`, included from `CLAUDE.md` |
-| Multi-model panels (arena, architect, interrogate, how-critics) | Provider dispatch restores the upstream frontier quad: `claude:claude-fable-5@max`, `codex:gpt-5.6-sol@max`, `grok:grok-4.6@xhigh`, `claude:claude-opus-5@xhigh`. Same-provider lanes stay native; external lanes use the bundled runner. |
+| Multi-model panels (arena, architect, interrogate, how-critics) | Provider dispatch preserves each role's ordered lanes. Initial Arena and Architect panels use `codex:gpt-5.6-sol@max`, `claude:claude-opus-5@xhigh`, one model per active provider. How critics and Interrogate use `codex:gpt-5.6-sol@max`, `claude:claude-opus-5@xhigh`. Terra high remains the feature-implementation model. Same-provider lanes stay native; cross-parent lanes use the bundled runner. |
 
 ### Cross-vendor dispatch
 

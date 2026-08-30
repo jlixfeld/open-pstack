@@ -40,4 +40,16 @@ describe("runner CLI parsing", () => {
       "greater than zero"
     );
   });
+
+  it("rejects unsupported provider, model, and family effort combinations", () => {
+    expect(() => parseArgs(argv(["--provider", "claude", "--model", "gpt-5.6-sol"]))).toThrow(
+      "unsupported model or effort: claude:gpt-5.6-sol@max"
+    );
+    expect(() => parseArgs(argv(["--provider", "claude", "--model", "claude-opus-5", "--effort", "ultra"]))).toThrow(
+      "unsupported model or effort: claude:claude-opus-5@ultra"
+    );
+    expect(() => parseArgs(argv(["--provider", "codex", "--model", "gpt-5.6-luna", "--effort", "ultra"]))).toThrow(
+      "unsupported model or effort: codex:gpt-5.6-luna@ultra"
+    );
+  });
 });

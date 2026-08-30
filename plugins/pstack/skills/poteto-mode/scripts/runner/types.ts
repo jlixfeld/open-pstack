@@ -1,7 +1,16 @@
 export const PARENTS = ["claude", "codex"] as const;
 export const PROVIDERS = ["claude", "codex", "grok"] as const;
-export const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+export const EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"] as const;
 export const ACCESS_MODES = ["read-only", "isolated-write"] as const;
+
+export const MODEL_EFFORTS = {
+  "claude:claude-fable-5": ["low", "medium", "high", "xhigh", "max"],
+  "claude:claude-opus-5": ["low", "medium", "high", "xhigh", "max"],
+  "codex:gpt-5.6-sol": ["low", "medium", "high", "xhigh", "max", "ultra"],
+  "codex:gpt-5.6-terra": ["low", "medium", "high", "xhigh", "max", "ultra"],
+  "codex:gpt-5.6-luna": ["low", "medium", "high", "xhigh", "max"],
+  "grok:grok-4.6": ["low", "medium", "high", "xhigh", "max"],
+} as const satisfies Record<string, readonly Effort[]>;
 
 export type Parent = (typeof PARENTS)[number];
 export type Provider = (typeof PROVIDERS)[number];

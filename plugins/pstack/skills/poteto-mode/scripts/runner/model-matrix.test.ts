@@ -1,7 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { EFFORTS, type Effort } from "./types.ts";
+import { defaultRoleMap, renderRoleMap } from "../routing/role-map.ts";
+import { parseManifest } from "../routing/manifest.ts";
+import { EFFORTS, MODEL_EFFORTS, type Effort } from "./types.ts";
 
 const PLUGIN_ROOT = join(import.meta.dir, "../../../..");
 const DISPATCH_PATH = join(
@@ -21,10 +23,10 @@ const MATRIX_HEADER = [
   "Claude-native agent stem",
 ] as const;
 
-const FAMILY_ORDER = ["fable", "sol", "grok", "opus"] as const;
+const FAMILY_ORDER = ["fable", "sol", "terra", "luna", "grok", "opus"] as const;
 const PROVIDERS = ["claude", "codex", "grok"] as const;
 const DESCRIPTOR_RE =
-  /(claude|codex|grok):[a-z0-9.-]+@(low|medium|high|xhigh|max)/g;
+  /(claude|codex|grok):[a-z0-9.-]+@(low|medium|high|xhigh|max|ultra)/g;
 const PANEL_ROLES = [
   "how critics",
   "arena runners",
@@ -33,7 +35,8 @@ const PANEL_ROLES = [
   "interrogate reviewers",
 ] as const;
 const SHEET_ROLES = [
-  "feature, refactoring",
+  "feature implementation",
+  "refactoring implementation",
   "bug-fix",
   "perf-issue",
   "hillclimb",
@@ -53,9 +56,9 @@ const SHEET_ROLES = [
 const SETUP_SECTION_ORDER = [
   "### 2. Load current state",
   "### 3. Parse per-family efforts",
-  "### 4. Collect one requested effort per family",
-  "### 5. Probe the four requested pairs",
-  "### 6. Render, preserving role families",
+  "### 4. Apply named role edits",
+  "### 5. Probe the final map",
+  "### 6. Render the exact final map",
   "### 7. Confirm and commit",
 ] as const;
 
@@ -108,9 +111,9 @@ function parseModelMatrix(markdown: string): MatrixRow[] {
     .slice(start + 1, end)
     .map((line) => line.trim())
     .filter((line) => line.startsWith("|"));
-  if (table.length !== 6) {
+  if (table.length !== 8) {
     throw new Error(
-      `model matrix must be header, separator, and 4 data rows, got ${table.length}`
+      `model matrix must be header, separator, and 6 data rows, got ${table.length}`
     );
   }
   const header = splitRow(table[0]);
@@ -161,12 +164,6 @@ function parseModelMatrix(markdown: string): MatrixRow[] {
   });
 }
 
-function defaultDescriptors(rows: MatrixRow[]): string[] {
-  return rows.map(
-    (row) => `${row.provider}:${row.model}@${row.defaultEffort}`
-  );
-}
-
 function parseFrontmatter(text: string): {
   fields: Record<string, string>;
   body: string;
@@ -201,11 +198,11 @@ function firstRunSheet(setup: string): string {
 
 describe("model matrix", () => {
   const rows = parseModelMatrix(readFileSync(DISPATCH_PATH, "utf8"));
+  const manifest = parseManifest(readFileSync(DISPATCH_PATH, "utf8"));
   const setup = readFileSync(SETUP_PATH, "utf8");
-  const quad = defaultDescriptors(rows);
 
   it("owns the effort universe and first-run defaults", () => {
-    expect([...EFFORTS]).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect([...EFFORTS]).toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
     expect(rows.map((row) => row.family)).toEqual([...FAMILY_ORDER]);
     for (const row of rows) {
       expect(row.upstreamChoice.length).toBeGreaterThan(0);
@@ -220,9 +217,18 @@ describe("model matrix", () => {
     ).toEqual([
       ["fable", "max"],
       ["sol", "max"],
+      ["terra", "high"],
+      ["luna", "high"],
       ["grok", "xhigh"],
       ["opus", "xhigh"],
     ]);
+    const documentedEfforts = rows.map((row) => [
+      `${row.provider}:${row.model}`,
+      row.selectableEfforts,
+    ] as const).sort(([left], [right]) => left.localeCompare(right));
+    const runnerEfforts = Object.entries(MODEL_EFFORTS)
+      .sort(([left], [right]) => left.localeCompare(right));
+    expect(JSON.stringify(documentedEfforts)).toBe(JSON.stringify(runnerEfforts));
   });
 
   it("ships exactly the declared Claude-native frontier agents", () => {
@@ -271,6 +277,7 @@ describe("model matrix", () => {
 
   it("keeps setup's first-run default panel copy aligned with the matrix", () => {
     const sheet = firstRunSheet(setup);
+    expect(sheet).toBe(renderRoleMap(defaultRoleMap(manifest)));
     const roles = sheet
       .split("\n")
       .filter((line) => line.includes(": "))
@@ -287,9 +294,15 @@ describe("model matrix", () => {
       if (row === undefined) {
         throw new Error(`unknown first-run descriptor: ${descriptor}`);
       }
-      expect(effort).toBe(row.defaultEffort);
+      expect(row.selectableEfforts).toContain(asEffort(effort));
     }
-    const expectedPanel = quad.join(", ");
+    const expectedPanels = new Map([
+      ["how critics", "codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
+      ["arena runners", "codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
+      ["arena cross-judge pool", "codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
+      ["architect runners", "codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
+      ["interrogate reviewers", "codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
+    ]);
     for (const role of PANEL_ROLES) {
       const line = sheet
         .split("\n")
@@ -297,8 +310,42 @@ describe("model matrix", () => {
       if (line === undefined) {
         throw new Error(`missing first-run panel row: ${role}`);
       }
-      expect(line).toBe(`${role}: ${expectedPanel}`);
+      expect(line).toBe(`${role}: ${expectedPanels.get(role)}`);
     }
+  });
+
+  it("keeps workflow consumer defaults aligned with the role registry", () => {
+    const consumer = (roleName: string) => {
+      const role = manifest.roles.find((entry) => entry.name === roleName);
+      if (role === undefined) throw new Error(`missing role: ${roleName}`);
+      return role.firstRunLanes.map((lane) => `\`${lane}\``);
+    };
+    const arena = readFileSync(join(PLUGIN_ROOT, "skills/arena/SKILL.md"), "utf8");
+    expect(arena).toContain(`Otherwise default to ${consumer("arena runners").join(", ")}.`);
+    expect(arena).toContain(`otherwise from ${consumer("arena cross-judge pool").join(", ")}.`);
+    const architect = readFileSync(join(PLUGIN_ROOT, "skills/architect/SKILL.md"), "utf8");
+    expect(architect).toContain(`defaults ${consumer("architect runners").join(", ")})`);
+    const how = readFileSync(join(PLUGIN_ROOT, "skills/how/SKILL.md"), "utf8");
+    expect(how).toContain(`default ${consumer("how explorer")[0]})`);
+    expect(how).toContain(`default ${consumer("how explainer")[0]})`);
+    expect(how).toContain(`defaults ${consumer("how critics").join(", ")})`);
+    const interrogate = readFileSync(join(PLUGIN_ROOT, "skills/interrogate/SKILL.md"), "utf8");
+    expect(interrogate).toContain([
+      ...consumer("interrogate reviewers").map((lane, index) =>
+        `| Reviewer ${String.fromCharCode("A".charCodeAt(0) + index)} | ${lane} |`
+      ),
+      "",
+      "For each reviewer",
+    ].join("\n"));
+    const swarm = readFileSync(join(PLUGIN_ROOT, "skills/swarm/SKILL.md"), "utf8");
+    expect(swarm).toContain(`Otherwise use ${consumer("swarm workers")[0]}.`);
+    const reference = readFileSync(join(PLUGIN_ROOT, "../../docs/reference.md"), "utf8");
+    expect(reference).toContain(
+      `Initial Arena and Architect panels use ${consumer("arena runners").join(", ")}, one model per active provider. How critics and Interrogate use ${consumer("how critics").join(", ")}.`
+    );
+    expect(reference).toContain(
+      "Arena and Architect use one Sol lane and one Opus lane, one model per active provider."
+    );
   });
 
   it("keeps setup's fail-closed reconfiguration order", () => {
@@ -308,13 +355,11 @@ describe("model matrix", () => {
       expect(current).toBeGreaterThan(previous);
       previous = current;
     }
-    expect(setup).toContain("Do not invent a precedence rule.");
     expect(setup).toContain("Do not probe or write while any inconsistency is unresolved.");
     expect(setup).toContain("A failed probe writes nothing:");
-    expect(setup).toContain("Run one probe per family");
+    expect(setup).toContain("one probe for each distinct exact");
     expect(setup).toContain("normalized complete role map from step 2");
     expect(setup).toContain("Every documented role remains present.");
-    expect(setup).toContain("An effort-only rerun cannot change a role's family.");
     expect(setup).toContain("<!-- pstack:models:begin -->");
     expect(setup).toContain("<!-- pstack:models:end -->");
   });
