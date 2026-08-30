@@ -1,0 +1,5 @@
+ts	phase	decision	why	evidence	result
+2026-08-30T13:05:58Z	frame	created jlixfeld/open-pstack from Eric's port	the user required Eric's port as the sole fork parent	https://github.com/jlixfeld/open-pstack, port commit 27e0ce32be3dfc496d1372a4f3d45d91d15007da	fork created
+2026-08-30T13:05:58Z	frame	opened implementation issue 1 and created feature branch	repository rules require durable work to start from an issue and avoid main	https://github.com/jlixfeld/open-pstack/issues/1, feature/issue-1-tiered-model-routing	ready for design
+2026-08-30T13:07:23Z	baseline	captured the pre-change verification baseline	each implementation unit needs a known-good comparison point	bun run test: 155 pass; bun run typecheck: pass; PSTACK_STATIC_ONLY=1 tests/skill-collision-repro.sh: pass	baseline green
+2026-08-30T13:33:58Z	design	selected the Terra architecture with targeted Sol grafts	the cross-judge scored Terra 35.5/40 and found Sol's journal and proof-file subsystem outside the requested scope	docs/tiered-routing-design.md, /private/tmp/open-pstack-architecture/judge-sol.md	design ready for implementation
