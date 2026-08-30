@@ -48,6 +48,9 @@ Files authored for this port (not derived from upstream):
 - `plugins/pstack/skills/poteto-mode/scripts/bootstrap.test.ts`
 - `plugins/pstack/skills/poteto-mode/scripts/check-plan.test.ts`
 - `plugins/pstack/skills/poteto-mode/scripts/routing/` and `plugins/pstack/skills/poteto-mode/scripts/setup/`
+- `plugins/pstack/skills/poteto-mode/scripts/upstream-pstack/`
+- `.github/workflows/cursor-pstack-monitor.yml`
+- `docs/upstream-pstack-monitoring.md`
 - `plugins/pstack/skills/babysit/SKILL.md` (independently authored; workflow informed by Cursor's public `/babysit` behavior)
 - `plugins/pstack/agents/pstack-fable-*.md` and `plugins/pstack/agents/pstack-opus-*.md` (Claude-native frontier lanes at each selectable effort)
 - `plugins/pstack/hooks/hooks.json`, `plugins/pstack/hooks/session-start`, and `plugins/pstack/hooks/session-start-context.md` (the auto-fire hook and its mandate)

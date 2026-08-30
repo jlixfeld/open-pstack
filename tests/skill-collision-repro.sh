@@ -45,8 +45,6 @@ else
   fail=1
 fi
 
-# Static invariant: provider-dispatch owns the role registry. The setup example
-# must preserve the split implementation roles and the cross-judge pool.
 setup="$repo/plugins/pstack/skills/setup-pstack/SKILL.md"
 dispatch="$repo/plugins/pstack/skills/poteto-mode/references/provider-dispatch.md"
 route_bad=""
