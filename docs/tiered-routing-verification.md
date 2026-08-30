@@ -16,6 +16,32 @@ Fable and Grok were not probed because neither family appears in the initial act
 
 ## Mixed-panel smoke tests
 
+### Current one-per-provider panels
+
+Commit `032abcc4076e1ed8629a4d1ffbb766fefce097b1` uses one model per active provider for Arena and Architect. Sol represents OpenAI and Opus represents Anthropic. Terra remains the feature-implementation model.
+
+| Codex-parent lane | Route | Result | Elapsed | Usage | Cost |
+| --- | --- | --- | ---: | --- | ---: |
+| Sol max | Native Codex | Pass | Not exposed | Not exposed | Not exposed |
+| Opus xhigh | External Claude | Pass | 113,669 ms | input 24, cache read 430,962, cache create 51,677, output 8,099 | $0.936045 |
+| Sol max judge | Native Codex | Pass | Not exposed | Not exposed | Not exposed |
+
+The installed Codex plugin matched the candidate tree outside generated dependency links. Both candidate lanes returned `arena=sol,opus`, `architect=sol,opus`, and `terra=feature-only`. The independent judge passed.
+
+| Claude-parent lane | Route | Result | Elapsed | Usage | Cost |
+| --- | --- | --- | ---: | --- | ---: |
+| Sol max | External Codex | Pass | 57,330 ms | input 78,347, cache read 55,552, output 2,715, reasoning 1,246 | Not exposed |
+| Opus xhigh | Native Claude | Pass | 48,188 ms | 40,185 total subagent tokens | Not exposed per lane |
+| Sol max judge | External Codex | Pass | 88,336 ms | input 74,027, cache read 43,520, output 4,356, reasoning 2,290 | Not exposed |
+
+The Claude parent loaded the exact candidate with `--plugin-dir`. Its 332,277 ms orchestration cost $2.128313. The parent drained the retained judge process until its receipt said `complete`, and the judge returned `JUDGE_VERDICT: PASS`. No third candidate, duplicate provider, substitution, or dropout occurred.
+
+Two earlier attempts remained loud failures. Commit `47e5e2e` exposed stale three-lane prose in `docs/reference.md` and returned before its judge completed, so the runner recorded the judge as cancelled. Commit `7ea9ac2` exposed a second stale reference in the same file. Both references now have registry-bound regression assertions. No failed run triggered a fallback.
+
+### Superseded three-lane panels
+
+The following runs verified the earlier Terra, Sol, and Opus panel before the one-model-per-provider refinement.
+
 The Claude-parent panel loaded the candidate with `--plugin-dir`. Terra and Sol used the external Codex runner. Opus used the native Claude agent. The independent Sol judge returned `JUDGE_VERDICT: PASS`.
 
 | Claude-parent lane | Route | Result | Elapsed | Usage | Cost |
@@ -25,7 +51,7 @@ The Claude-parent panel loaded the candidate with `--plugin-dir`. Terra and Sol 
 | Opus xhigh | Native Claude | Pass | 4,150 ms | 33,815 total subagent tokens | Not exposed per lane |
 | Sol max judge | External Codex | Pass | 28,406 ms | input 40,097, cache read 27,136, output 1,040, reasoning 572 | Not exposed |
 
-The exact-final Claude-parent orchestration loaded commit `002a881a366c6b058e6de28bee69935e04a75582`, took 200,913 ms, and reported $1.906730 aggregate cost. All three lanes returned in configured order, the independent judge passed, and no lane dropped out or substituted a model. This successful run supersedes the earlier session-limit dropout.
+The earlier Claude-parent orchestration loaded commit `002a881a366c6b058e6de28bee69935e04a75582`, took 200,913 ms, and reported $1.906730 aggregate cost. All three lanes returned in configured order, the independent judge passed, and no lane dropped out or substituted a model.
 
 The Codex-parent panel used native Terra and Sol tasks plus the external Opus runner. Its independent Opus judge returned `JUDGE_VERDICT: PASS`.
 
@@ -44,7 +70,7 @@ Sol and Opus ran independent adversarial reviews. Accepted findings covered nest
 
 The final local gate passed:
 
-- 209 Bun tests across 20 files with 810 assertions.
+- 209 Bun tests across 20 files with 814 assertions.
 - Strict TypeScript checks for watch-pr, runner, routing, setup, upstream-pstack, and check-plan.
 - Static skill and routing invariants.
 - JSON parsing for both marketplace manifests and both plugin manifests.
