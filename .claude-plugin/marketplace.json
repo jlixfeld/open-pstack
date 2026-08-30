@@ -1,7 +1,7 @@
 {
   "name": "open-pstack",
   "owner": {
-    "name": "Eric Litman"
+    "name": "jlixfeld"
   },
   "description": "Pstack for Claude Code and Codex, tracking Cursor's upstream pstack.",
   "plugins": [
@@ -13,7 +13,7 @@
       "author": {
         "name": "Lauren Tan (original)"
       },
-      "homepage": "https://github.com/ericlitman/open-pstack",
+      "homepage": "https://github.com/jlixfeld/open-pstack",
       "license": "MIT",
       "keywords": [
         "pstack",

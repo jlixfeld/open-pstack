@@ -1,0 +1,4 @@
+{
+  "extends": "../routing/tsconfig.json",
+  "include": ["*.ts"]
+}

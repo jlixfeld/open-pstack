@@ -11,13 +11,41 @@ pstack model choices are provider-qualified descriptors:
 | Family | Upstream pstack choice | Provider | Model | Default effort | Selectable efforts | Claude-native agent stem |
 |---|---|---|---|---|---|---|
 | fable | claude-fable-5-thinking-max | claude | claude-fable-5 | max | low medium high xhigh max | fable |
-| sol | gpt-5.6-sol-max | codex | gpt-5.6-sol | max | low medium high xhigh max | - |
+| sol | gpt-5.6-sol-max | codex | gpt-5.6-sol | max | low medium high xhigh max ultra | - |
+| terra | gpt-5.6-terra-high | codex | gpt-5.6-terra | high | low medium high xhigh max ultra | - |
+| luna | gpt-5.6-luna-high | codex | gpt-5.6-luna | high | low medium high xhigh max | - |
 | grok | grok-4.6-fast-xhigh | grok | grok-4.6 | xhigh | low medium high xhigh max | - |
 | opus | claude-opus-5-thinking-xhigh | claude | claude-opus-5 | xhigh | low medium high xhigh max | opus |
 
-The allowed effort universe is exactly `low`, `medium`, `high`, `xhigh`, `max`. First-run requested efforts are the Default effort cell of each row. A Claude-native agent stem of `-` means the family has no Claude-native agent. Otherwise the shipped agent name is `pstack-<stem>-<effort>`.
+Selectable efforts are family-specific. Sol and Terra accept `ultra`; Luna stops at `max`; Fable, Grok, and Opus preserve their current valid efforts. The matrix describes every supported family, but an active map may omit any family. A Claude-native agent stem of `-` means the family has no Claude-native agent. Otherwise the shipped agent name is `pstack-<stem>-<effort>`.
 
 `fast` is part of Cursor's Grok selector, not a Grok Build CLI model or effort flag. The portable Grok route pins the current CLI model `grok-4.6`. The first-run Grok effort is `xhigh`.
+
+## Role registry
+
+The registry is the first-run map and sheet schema. A `single` role has exactly
+one lane. A `panel` launches every stored lane in order, including repeats. A
+`pool` preserves ordered lanes while the workflow chooses one.
+
+| Role | Shape | First-run lanes |
+| --- | --- | --- |
+| feature implementation | single | codex:gpt-5.6-terra@high |
+| refactoring implementation | single | codex:gpt-5.6-luna@high |
+| bug-fix | single | codex:gpt-5.6-sol@max |
+| perf-issue | single | codex:gpt-5.6-sol@max |
+| hillclimb | single | codex:gpt-5.6-sol@max |
+| judgment and prose | single | claude:claude-opus-5@xhigh |
+| hardest tasks | single | claude:claude-opus-5@xhigh |
+| how explorer | single | codex:gpt-5.6-luna@medium |
+| how explainer | single | claude:claude-opus-5@xhigh |
+| how critics | panel | codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
+| why investigators, synthesizer | panel | inherit-parent |
+| reflect tooling, judgment, divergent, synthesizer | panel | inherit-parent |
+| arena runners | panel | codex:gpt-5.6-terra@high, codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
+| arena cross-judge pool | pool | codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
+| swarm workers | single | codex:gpt-5.6-luna@high |
+| architect runners | panel | codex:gpt-5.6-terra@high, codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
+| interrogate reviewers | panel | codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
 
 ## The parent owns the route
 
@@ -28,7 +56,7 @@ The top-level harness resolves the route once. A child receives an assigned prov
 | Claude Code | native `Agent` | external runner | external runner |
 | Codex | external runner | native `spawn_agent` | external runner |
 
-`inherit-parent` and `auto` remain aliases. They use the parent's current model and effort through its native subagent primitive. In a panel they still consume one lane, but they reduce provider diversity; say so in the synthesis record.
+`inherit-parent` and `auto` remain aliases. They use the parent's current model and effort through its native subagent primitive. In a panel they still consume one lane, but they reduce provider diversity; say so in the synthesis record. The route resolver has no fallback branch.
 
 ## Native lanes
 
@@ -48,7 +76,7 @@ pstack-runner \
   --parent <claude|codex> \
   --provider <claude|codex|grok> \
   --model <real CLI model> \
-  --effort <low|medium|high|xhigh|max> \
+  --effort <low|medium|high|xhigh|max|ultra> \
   --mode <read-only|isolated-write> \
   --prompt <unique prompt file> \
   --cwd <repository or dedicated worktree> \
