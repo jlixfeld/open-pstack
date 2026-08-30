@@ -1,4 +1,4 @@
-import type { PreparedSetup, Snapshot } from "./engine.ts";
+import type { PreparedSetup, RenderedTarget, Snapshot } from "./engine.ts";
 import { renderLane } from "../routing/role-map.ts";
 
 export interface SetupFilesystem {
@@ -37,14 +37,18 @@ export function commitSetup(prepared: PreparedSetup, probes: readonly ProbeResul
   }
   const changed = prepared.targets.filter((target) => !sameBytes(target.bytes, target.nextBytes));
   if (changed.length === 0) return;
+  const written: RenderedTarget[] = [];
   try {
-    for (const target of changed) fs.replaceAtomically(target.path, target.nextBytes);
+    for (const target of changed) {
+      fs.replaceAtomically(target.path, target.nextBytes);
+      written.push(target);
+    }
     for (const target of prepared.targets) {
       if (!sameBytes(fs.read(target.path), target.nextBytes)) throw new Error(`setup readback failed: ${target.path}`);
     }
   } catch (error) {
     const rollbackFailures: string[] = [];
-    for (const target of prepared.targets) {
+    for (const target of written.reverse()) {
       try {
         restore(target, fs);
       } catch (rollbackError) {

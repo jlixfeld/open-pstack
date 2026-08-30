@@ -30,7 +30,13 @@ The repository names Cursor's repository as the `cursor-upstream` remote in the 
 git remote add cursor-upstream https://github.com/cursor/plugins.git
 ```
 
-Fetch and inspect only commits that touched pstack after the recorded sync point:
+Run the repeatable monitor from the repository root. It fetches the configured read-only remote and reports only `pstack/` drift:
+
+```shell
+plugins/pstack/skills/poteto-mode/scripts/upstream-pstack/pstack-upstream
+```
+
+The underlying manual inspection commands are:
 
 ```shell
 git fetch cursor-upstream main
@@ -42,11 +48,23 @@ No output means the tracked pstack tree has not changed. This comparison does no
 
 ## Incorporate a change
 
-1. Create or update a GitHub issue in `ericlitman/open-pstack` and branch from current `main`.
+1. Create or update a GitHub issue in `jlixfeld/open-pstack` and branch from current `main`.
 2. Read each upstream pstack commit in order. Bring over its intent and content, then apply only the Claude Code and Codex substitutions documented in `CHANGES.md`.
 3. Keep one shared `plugins/pstack/skills/` tree. Put harness translation in the existing `codex-tools.md` and provider routing in `provider-dispatch.md`; do not fork a skill per harness.
 4. Update the commit and version in this file, the affected provenance rows in `NOTICE.md`, and `README-UPSTREAM.md` when upstream changes it.
 5. Run CI-equivalent checks locally, then run the installed Claude Code and Codex behavioral lanes required by the changed surface. Unit tests alone are not a release gate.
 6. Merge the reviewed PR before tagging the next open-pstack release.
+
+## Pull from Eric's port
+
+Keep direct port updates separate from Cursor backports:
+
+```shell
+git fetch port-upstream main
+git switch -c port-upstream/<topic> main
+git log --oneline main..port-upstream/main
+```
+
+Review the Eric commits, merge or cherry-pick the intended range on that branch, run the same repository and live-surface checks, and open a pull request against this fork. Do not update the Cursor content-sync commit unless the pull request independently verifies and incorporates the corresponding Lauren changes under `pstack/`.
 
 Cursor's version and open-pstack's version are independent. Cursor's version identifies the imported content; open-pstack's version identifies the cross-harness distribution.

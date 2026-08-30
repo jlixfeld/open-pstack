@@ -61,6 +61,14 @@ else
   note "ok: routing registry and setup example preserve the split roles and pool"
 fi
 
+monitor="$repo/.github/workflows/cursor-pstack-monitor.yml"
+if grep -Fq 'ref: ${{ github.event.repository.default_branch }}' "$monitor"; then
+  note "ok: manual upstream monitoring reconciles from the default branch"
+else
+  note "FAIL: upstream monitoring can reconcile repository issues from a non-default branch"
+  fail=1
+fi
+
 plugin="$repo/plugins/pstack"
 canon="$plugin/skills/poteto-mode/references/bugbot-triage.md"
 skill="$plugin/skills/babysit/SKILL.md"

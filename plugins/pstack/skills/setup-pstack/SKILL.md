@@ -67,6 +67,8 @@ Use the harness and tool surface running this skill: Claude Code or Codex. Envir
 
 Read the current parent-specific sheet when it exists. Treat its values as current role-to-descriptor assignments. Overlay its rows on the complete registry; materialize missing documented rows on the next successful write. A duplicate or unknown role row is inconsistent state. A bare host-native slug is invalid. If the legacy `feature, refactoring` row is present by itself, expand its exact lanes into `feature implementation` and `refactoring implementation`; every successful render keeps those rows separate.
 
+The active sheet and parent integration file must be regular files or absent. Reject symlink-backed targets before probing or writing so setup never replaces configuration links.
+
 ### 3. Parse per-family efforts
 
 Read the model matrix. Every non-alias value must match `<provider>:<model>@<effort>`, map to exactly one matrix family by `(provider, model)`, and use an effort from that family's Selectable efforts cell. `inherit-parent` and `auto` carry no descriptor. Sol and Terra allow `ultra`; Luna does not.

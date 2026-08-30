@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
 import { prepareSetup, type Snapshot } from "./engine.ts";
 import { nodeFilesystem } from "./integration.ts";
@@ -41,6 +41,7 @@ export function isMissingPathError(error: unknown): boolean {
 
 function read(path: string): Uint8Array | null {
   try {
+    if (lstatSync(path).isSymbolicLink()) throw new Error(`setup target must not be a symlink: ${path}`);
     return readFileSync(path);
   } catch (error) {
     if (isMissingPathError(error)) return null;
@@ -86,6 +87,10 @@ function parent(value: string): "claude" | "codex" {
 
 function snapshot(path: string): Snapshot {
   return { path, bytes: read(path) };
+}
+
+function snapshotHash(value: Snapshot): string | null {
+  return value.bytes === null ? null : hash(value.bytes);
 }
 
 function descriptor(lane: { readonly provider: string; readonly model: string; readonly effort: string }): string {
@@ -187,7 +192,11 @@ function prepareFromPlan(plan: SetupPlan, manifestMarkdown: string) {
   return prepared;
 }
 
-export function prepare(argv: readonly string[], io: Io = defaultIo): void {
+export function prepare(
+  argv: readonly string[],
+  io: Io = defaultIo,
+  capture: (path: string) => Snapshot = snapshot,
+): void {
   const parsed = options(argv);
   known(parsed, ["parent", "manifest", "sheet", "integration", "plan", "edit"]);
   const parentValue = parent(required(parsed, "parent"));
@@ -198,14 +207,16 @@ export function prepare(argv: readonly string[], io: Io = defaultIo): void {
   const manifestBytes = readFileSync(manifestPath);
   const manifestMarkdown = new TextDecoder().decode(manifestBytes);
   const edits = parseEdits(parsed.get("edit") ?? [], manifestMarkdown);
-  const prepared = prepareSetup({ parent: parentValue, manifestMarkdown, sheet: snapshot(sheetPath), integration: snapshot(integrationPath), edits });
+  const sheet = capture(sheetPath);
+  const integration = capture(integrationPath);
+  const prepared = prepareSetup({ parent: parentValue, manifestMarkdown, sheet, integration, edits });
   const plan: SetupPlan = {
     schemaVersion: 1,
     parent: parentValue,
     manifest: { path: manifestPath, hash: hash(manifestBytes) },
     targets: [
-      { path: sheetPath, hash: targetHash(sheetPath) },
-      { path: integrationPath, hash: targetHash(integrationPath) },
+      { path: sheetPath, hash: snapshotHash(sheet) },
+      { path: integrationPath, hash: snapshotHash(integration) },
     ],
     edits: edits.map((edit) => ({ role: edit.role, lanes: edit.lanes.map((lane) => typeof lane === "string" ? lane : descriptor(lane)) })),
     probes: prepared.probes.map(descriptor),

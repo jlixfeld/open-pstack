@@ -12,6 +12,7 @@ class FakeFilesystem implements SetupFilesystem {
   readonly files = new Map<string, Uint8Array>();
   readonly writes: string[] = [];
   failWrite: string | null = null;
+  failWriteCreates: { readonly path: string; readonly text: string } | null = null;
   failReadback: string | null = null;
 
   constructor(initial: readonly { readonly path: string; readonly text: string }[]) {
@@ -23,6 +24,10 @@ class FakeFilesystem implements SetupFilesystem {
   }
   replaceAtomically(path: string, bytes: Uint8Array): void {
     this.writes.push(path);
+    if (this.failWriteCreates?.path === path) {
+      this.files.set(path, encoder.encode(this.failWriteCreates.text));
+      throw new Error(`write raced: ${path}`);
+    }
     if (this.failWrite === path) throw new Error(`write failed: ${path}`);
     this.files.set(path, bytes);
   }
@@ -134,6 +139,20 @@ describe("prepare setup", () => {
       expect(fs.value("sheet")).toBe(beforeSheet);
       expect(fs.value("integration")).toBe(beforeIntegration);
     }
+  });
+
+  it("does not remove an absent target created by another actor during a failed write", () => {
+    const fs = new FakeFilesystem([{ path: "integration", text: "old\n" }]);
+    const value = prepareSetup({
+      parent: "codex",
+      manifestMarkdown,
+      sheet: { path: "sheet", bytes: null },
+      integration: { path: "integration", bytes: fs.read("integration") },
+    });
+    fs.failWriteCreates = { path: "sheet", text: "external actor\n" };
+    expect(() => commitSetup(value, passed(value), fs)).toThrow("write raced");
+    expect(fs.value("sheet")).toBe("external actor\n");
+    expect(fs.value("integration")).toBe("old\n");
   });
 
   it("does no writes on a byte-identical rerun", () => {
