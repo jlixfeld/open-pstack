@@ -343,6 +343,9 @@ describe("model matrix", () => {
     expect(reference).toContain(
       `Initial Arena and Architect panels use ${consumer("arena runners").join(", ")}, one model per active provider. How critics and Interrogate use ${consumer("how critics").join(", ")}.`
     );
+    expect(reference).toContain(
+      "Arena and Architect use one Sol lane and one Opus lane, one model per active provider."
+    );
   });
 
   it("keeps setup's fail-closed reconfiguration order", () => {
