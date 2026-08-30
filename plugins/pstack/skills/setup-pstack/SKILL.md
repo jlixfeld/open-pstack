@@ -115,7 +115,7 @@ After the operator confirms, recheck both target baselines before writing the in
 ```markdown
 # pstack model configuration
 
-Provider-qualified per-role choices. Read the installed pstack provider-dispatch reference before dispatching a configured role. Every documented role remains present. `inherit-parent` and `auto` use the parent model natively and still count as one panel lane.
+Provider-qualified per-role choices. Read the installed pstack provider-dispatch reference before dispatching a configured role. Every documented role remains present. `inherit-parent` and `auto` use the parent model natively and still count as one stored lane.
 
 feature implementation: codex:gpt-5.6-terra@high
 refactoring implementation: codex:gpt-5.6-luna@high
@@ -138,9 +138,9 @@ interrogate reviewers: codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh
 
 ### 8. Wire it in
 
-Render the parent integration in memory before either write. On Claude, the integration is the single `@~/.claude/pstack-models.md` include in `~/.claude/CLAUDE.md`. On Codex, it is the exact sheet bytes between one `<!-- pstack:models:begin -->` and `<!-- pstack:models:end -->` pair in `~/.codex/AGENTS.md`. Replace that whole bounded block on a rerun. Insert one block at the end on first run. If either marker is missing, duplicated, or reversed, stop and report inconsistent state instead of guessing a boundary.
+Canonicalize every setup target before reading or writing it, including a literal `~` passed without shell expansion. Render the parent integration in memory before either write. On Claude, the integration is one include for the canonical selected sheet path in `~/.claude/CLAUDE.md`. Treat the equivalent home-relative include (normally `@~/.claude/pstack-models.md`) as the same target and replace it instead of appending a duplicate. On Codex, the integration is the exact sheet bytes between one `<!-- pstack:models:begin -->` and `<!-- pstack:models:end -->` pair in `~/.codex/AGENTS.md`. Replace that whole bounded block on a rerun. Insert one block at the end on first run. If either marker is missing, duplicated, or reversed, stop and report inconsistent state instead of guessing a boundary.
 
-Snapshot every target's current bytes. Write the sheet and parent integration only after every final-map probe passes and the operator confirms. Read both targets back and compare them with the in-memory render. If either write or readback fails, restore every snapshot and report the failure. An unchanged rerun performs no writes and produces byte-identical sheet and integration content.
+Snapshot every target's current bytes. Write the sheet and parent integration only after every final-map probe passes and the operator confirms. Read both targets back and compare them with the in-memory render. If either write or readback fails, restore every target this transaction successfully replaced and report the failure. An unchanged rerun performs no writes and produces byte-identical sheet and integration content.
 
 Do not copy the model sheet between harnesses without rerunning the parent-specific probes; route availability can differ even on the same host.
 

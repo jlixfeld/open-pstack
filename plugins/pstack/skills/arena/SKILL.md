@@ -39,7 +39,7 @@ An external lane counts only when its receipt says `complete` and carries either
 
 ## Phase C: Cross-judge
 
-After all Phase B candidates complete, choose the judge descriptor from `arena cross-judge pool` in the current harness's pstack model sheet when present, otherwise from the runner defaults above. Prefer a provider different from the parent and the likely base candidate. Dispatch one read-only judge through the provider contract. It sees the rubric and completed candidates by path label, scores each criterion, and recommends a base with rationale. It runs in parallel with the parent's reading in Phase D, not with the candidates themselves. Starting it while candidates are still writing means the judge sees partial or empty outputs and reports them as dropouts.
+After all Phase B candidates complete, choose the judge descriptor from `arena cross-judge pool` in the current harness's pstack model sheet when present, otherwise from `codex:gpt-5.6-sol@max`, `claude:claude-opus-5@xhigh`. Prefer a provider different from the parent and the likely base candidate. Dispatch one read-only judge through the provider contract. It sees the rubric and completed candidates by path label, scores each criterion, and recommends a base with rationale. It runs in parallel with the parent's reading in Phase D, not with the candidates themselves. Starting it while candidates are still writing means the judge sees partial or empty outputs and reports them as dropouts.
 
 ## Phase D: Pick a base
 

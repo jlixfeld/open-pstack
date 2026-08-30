@@ -1,7 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { EFFORTS, type Effort } from "./types.ts";
+import { defaultRoleMap, renderRoleMap } from "../routing/role-map.ts";
+import { parseManifest } from "../routing/manifest.ts";
+import { EFFORTS, MODEL_EFFORTS, type Effort } from "./types.ts";
 
 const PLUGIN_ROOT = join(import.meta.dir, "../../../..");
 const DISPATCH_PATH = join(
@@ -162,12 +164,6 @@ function parseModelMatrix(markdown: string): MatrixRow[] {
   });
 }
 
-function defaultDescriptors(rows: MatrixRow[]): string[] {
-  return rows.map(
-    (row) => `${row.provider}:${row.model}@${row.defaultEffort}`
-  );
-}
-
 function parseFrontmatter(text: string): {
   fields: Record<string, string>;
   body: string;
@@ -202,8 +198,8 @@ function firstRunSheet(setup: string): string {
 
 describe("model matrix", () => {
   const rows = parseModelMatrix(readFileSync(DISPATCH_PATH, "utf8"));
+  const manifest = parseManifest(readFileSync(DISPATCH_PATH, "utf8"));
   const setup = readFileSync(SETUP_PATH, "utf8");
-  const quad = defaultDescriptors(rows);
 
   it("owns the effort universe and first-run defaults", () => {
     expect([...EFFORTS]).toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
@@ -226,6 +222,13 @@ describe("model matrix", () => {
       ["grok", "xhigh"],
       ["opus", "xhigh"],
     ]);
+    const documentedEfforts = rows.map((row) => [
+      `${row.provider}:${row.model}`,
+      row.selectableEfforts,
+    ] as const).sort(([left], [right]) => left.localeCompare(right));
+    const runnerEfforts = Object.entries(MODEL_EFFORTS)
+      .sort(([left], [right]) => left.localeCompare(right));
+    expect(JSON.stringify(documentedEfforts)).toBe(JSON.stringify(runnerEfforts));
   });
 
   it("ships exactly the declared Claude-native frontier agents", () => {
@@ -274,6 +277,7 @@ describe("model matrix", () => {
 
   it("keeps setup's first-run default panel copy aligned with the matrix", () => {
     const sheet = firstRunSheet(setup);
+    expect(sheet).toBe(renderRoleMap(defaultRoleMap(manifest)));
     const roles = sheet
       .split("\n")
       .filter((line) => line.includes(": "))
@@ -308,6 +312,33 @@ describe("model matrix", () => {
       }
       expect(line).toBe(`${role}: ${expectedPanels.get(role)}`);
     }
+  });
+
+  it("keeps workflow consumer defaults aligned with the role registry", () => {
+    const consumer = (roleName: string) => {
+      const role = manifest.roles.find((entry) => entry.name === roleName);
+      if (role === undefined) throw new Error(`missing role: ${roleName}`);
+      return role.firstRunLanes.map((lane) => `\`${lane}\``);
+    };
+    const arena = readFileSync(join(PLUGIN_ROOT, "skills/arena/SKILL.md"), "utf8");
+    expect(arena).toContain(`Otherwise default to ${consumer("arena runners").join(", ")}.`);
+    expect(arena).toContain(`otherwise from ${consumer("arena cross-judge pool").join(", ")}.`);
+    const architect = readFileSync(join(PLUGIN_ROOT, "skills/architect/SKILL.md"), "utf8");
+    expect(architect).toContain(`defaults ${consumer("architect runners").join(", ")})`);
+    const how = readFileSync(join(PLUGIN_ROOT, "skills/how/SKILL.md"), "utf8");
+    expect(how).toContain(`default ${consumer("how explorer")[0]})`);
+    expect(how).toContain(`default ${consumer("how explainer")[0]})`);
+    expect(how).toContain(`defaults ${consumer("how critics").join(", ")})`);
+    const interrogate = readFileSync(join(PLUGIN_ROOT, "skills/interrogate/SKILL.md"), "utf8");
+    expect(interrogate).toContain([
+      ...consumer("interrogate reviewers").map((lane, index) =>
+        `| Reviewer ${String.fromCharCode("A".charCodeAt(0) + index)} | ${lane} |`
+      ),
+      "",
+      "For each reviewer",
+    ].join("\n"));
+    const swarm = readFileSync(join(PLUGIN_ROOT, "skills/swarm/SKILL.md"), "utf8");
+    expect(swarm).toContain(`Otherwise use ${consumer("swarm workers")[0]}.`);
   });
 
   it("keeps setup's fail-closed reconfiguration order", () => {

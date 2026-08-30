@@ -15,9 +15,10 @@ export interface GitClient {
   blobAt(ref: string, path: string): Promise<string | null>;
 }
 
-function run(argv: readonly string[]): Promise<CommandResult> {
+function run(argv: readonly string[], cwd?: string): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(argv[0], argv.slice(1), {
+      cwd,
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -73,16 +74,18 @@ export function parseNameStatus(output: string): readonly Change[] {
 }
 
 export class ShellGitClient implements GitClient {
+  constructor(private readonly cwd?: string) {}
+
   async fetchCursorDefaultBranch(): Promise<string> {
     const argv = ["git", "fetch", "--no-tags", "cursor-upstream", "main"];
-    const result = await run(argv);
+    const result = await run(argv, this.cwd);
     if (result.code !== 0) throw commandError(argv, result);
     return "cursor-upstream/main";
   }
 
   async resolveCommit(ref: string): Promise<string> {
     const argv = ["git", "rev-parse", "--verify", `${ref}^{commit}`];
-    const result = await run(argv);
+    const result = await run(argv, this.cwd);
     if (result.code !== 0) throw commandError(argv, result);
     const sha = result.stdout.trim();
     if (!/^[0-9a-f]{40}$/.test(sha))
@@ -92,7 +95,7 @@ export class ShellGitClient implements GitClient {
 
   async isAncestor(base: string, head: string): Promise<boolean> {
     const argv = ["git", "merge-base", "--is-ancestor", base, head];
-    const result = await run(argv);
+    const result = await run(argv, this.cwd);
     if (result.code === 0) return true;
     if (result.code === 1) return false;
     throw commandError(argv, result);
@@ -107,16 +110,16 @@ export class ShellGitClient implements GitClient {
       "-M",
       `${base}..${head}`,
       "--",
-      "pstack/",
+      ":(top)pstack/",
     ];
-    const result = await run(argv);
+    const result = await run(argv, this.cwd);
     if (result.code !== 0) throw commandError(argv, result);
     return parseNameStatus(result.stdout);
   }
 
   async blobAt(ref: string, path: string): Promise<string | null> {
     const argv = ["git", "rev-parse", "--verify", "--quiet", `${ref}:${path}`];
-    const result = await run(argv);
+    const result = await run(argv, this.cwd);
     if (result.code === 1) return null;
     if (result.code !== 0) throw commandError(argv, result);
     const blob = result.stdout.trim();

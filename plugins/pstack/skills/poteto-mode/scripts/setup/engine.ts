@@ -33,6 +33,7 @@ export interface PrepareInput {
   readonly parent: Parent;
   readonly manifestMarkdown: string;
   readonly sheet: Snapshot;
+  readonly sheetAliases?: readonly string[];
   readonly integration: Snapshot;
   readonly edits?: readonly RoleAssignment[];
 }
@@ -45,13 +46,21 @@ function text(value: Uint8Array | null): string | null {
   return value === null ? null : new TextDecoder().decode(value);
 }
 
-function integration(parent: Parent, existing: string | null, sheet: string): string {
+function integration(parent: Parent, existing: string | null, sheet: string, sheetPath: string, sheetAliases: readonly string[]): string {
   if (parent === "claude") {
-    const include = "@~/.claude/pstack-models.md";
+    const include = `@${sheetPath}`;
     if (existing === null || existing.length === 0) return `${include}\n`;
-    const includes = existing.split(/\r?\n/).filter((line) => line.trim() === include);
-    if (includes.length > 1) throw new Error("duplicate Claude pstack include");
-    return includes.length === 1 ? existing : `${existing.replace(/\s*$/, "")}\n${include}\n`;
+    const accepted = new Set(sheetAliases.map((path) => `@${path}`));
+    const lines = existing.split(/\r?\n/);
+    const matches = lines.flatMap((line, index) => accepted.has(line.trim()) ? [index] : []);
+    if (matches.length > 1) throw new Error("duplicate Claude pstack include");
+    if (matches.length === 1) {
+      const index = matches[0];
+      if (lines[index] === include) return existing;
+      lines[index] = include;
+      return lines.join(existing.includes("\r\n") ? "\r\n" : "\n");
+    }
+    return `${existing.replace(/\s*$/, "")}\n${include}\n`;
   }
   const begin = "<!-- pstack:models:begin -->";
   const end = "<!-- pstack:models:end -->";
@@ -80,7 +89,13 @@ export function prepareSetup(input: PrepareInput): PreparedSetup {
   const current = input.sheet.bytes === null ? defaultRoleMap(manifest) : parseRoleMap(text(input.sheet.bytes) ?? "", manifest);
   const roles = applyRoleEdits(current, input.edits ?? [], manifest);
   const sheetText = renderRoleMap(roles);
-  const integrationText = integration(input.parent, text(input.integration.bytes), sheetText);
+  const integrationText = integration(
+    input.parent,
+    text(input.integration.bytes),
+    sheetText,
+    input.sheet.path,
+    input.sheetAliases ?? [input.sheet.path]
+  );
   return {
     parent: input.parent,
     manifest,

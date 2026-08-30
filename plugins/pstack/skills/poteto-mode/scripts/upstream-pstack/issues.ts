@@ -59,7 +59,7 @@ export function renderIssueBody(comparison: UpstreamComparison): string {
       ? ["- None"]
       : comparison.cursorOnlyMetadata.map((path) => `- \`${path}\``)),
     "",
-    "Backport each Lauren change on its own branch and PR. Advance `UPSTREAM.md` only after that PR has passed the required verification. Preserve the fork adaptations and tiered routing; Eric port updates use `port-upstream` on their own branches and PRs.",
+    "Backport each `cursor/plugins` pstack change on its own branch and PR. Advance `UPSTREAM.md` only after that PR has passed the required verification. Preserve the fork adaptations and tiered routing; Eric Litman's port updates use `port-upstream` on their own branches and PRs.",
     "",
     "- Codex",
     "",

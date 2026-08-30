@@ -40,7 +40,7 @@ function tableRows(markdown: string, heading: string): string[][] {
   return table;
 }
 
-function oneOf<T extends string>(value: string, choices: readonly T[], label: string): T {
+export function oneOf<T extends string>(value: string, choices: readonly T[], label: string): T {
   for (const choice of choices) if (choice === value) return choice;
   throw new Error(`invalid ${label}: ${value}`);
 }

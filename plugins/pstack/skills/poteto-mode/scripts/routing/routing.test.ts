@@ -48,6 +48,17 @@ describe("routing manifest", () => {
     ]);
   });
 
+  it("rejects unknown roles before and after known role rows", () => {
+    expect(() => parseRoleMap([
+      "featre implementation: codex:gpt-5.6-terra@high",
+      "feature implementation: codex:gpt-5.6-terra@high",
+    ].join("\n"), manifest)).toThrow("unknown role: featre implementation");
+    expect(() => parseRoleMap([
+      "feature implementation: codex:gpt-5.6-terra@high",
+      "unknown role: codex:gpt-5.6-sol@max",
+    ].join("\n"), manifest)).toThrow("unknown role: unknown role");
+  });
+
   it("preserves panel lane order and duplicates while keeping a pool distinct", () => {
     const roles = parseRoleMap([
       "how critics: codex:gpt-5.6-sol@max, codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh",

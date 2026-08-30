@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { chmodSync, existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isMissingPathError, main, prepare } from "./cli.ts";
+import { canonicalTarget, commit, isMissingPathError, main, prepare } from "./cli.ts";
 
 const manifest = readFileSync(join(import.meta.dir, "../../references/provider-dispatch.md"), "utf8");
 const directories: string[] = [];
@@ -48,6 +48,17 @@ afterEach(() => {
 });
 
 describe("pstack-setup CLI", () => {
+  it("canonicalizes tilde and relative setup targets while preserving include aliases", () => {
+    expect(canonicalTarget("~/.claude/pstack-models.md", "/work/repo", "/Users/operator")).toEqual({
+      path: "/Users/operator/.claude/pstack-models.md",
+      aliases: ["/Users/operator/.claude/pstack-models.md", "~/.claude/pstack-models.md"],
+    });
+    expect(canonicalTarget("config/models.md", "/work/repo", "/Users/operator")).toEqual({
+      path: "/work/repo/config/models.md",
+      aliases: ["/work/repo/config/models.md", "config/models.md"],
+    });
+  });
+
   it("recognizes only ENOENT as a missing target error", () => {
     expect(isMissingPathError(Object.assign(new Error("missing"), { code: "ENOENT" }))).toBe(true);
     expect(isMissingPathError(Object.assign(new Error("denied"), { code: "EACCES" }))).toBe(false);
@@ -80,6 +91,22 @@ describe("pstack-setup CLI", () => {
     writePassingProbes(paths);
     expect(main(["commit", "--plan", paths.plan, "--probe-results", paths.probes], { stdout: () => {}, stderr: () => {} })).toBe(64);
     expect(readFileSync(paths.sheet, "utf8")).toBe("concurrent operator change\n");
+  });
+
+  it("binds commit rendering to the exact snapshots used for drift checks", () => {
+    const paths = fixture();
+    expect(main(prepareArgs(paths), { stdout: () => {}, stderr: () => {} })).toBe(0);
+    writePassingProbes(paths);
+    let mutated = false;
+    expect(() => commit(["--plan", paths.plan, "--probe-results", paths.probes], (path) => {
+      const bytes = readFileSync(path);
+      if (path === paths.sheet && !mutated) {
+        mutated = true;
+        writeFileSync(path, "concurrent commit change\n");
+      }
+      return { path, bytes };
+    })).toThrow("stale setup baseline");
+    expect(readFileSync(paths.sheet, "utf8")).toBe("concurrent commit change\n");
   });
 
   it("rejects symlink-backed targets without replacing the link", () => {
@@ -154,5 +181,21 @@ describe("pstack-setup CLI", () => {
     expect(main(["commit", "--plan", paths.plan, "--probe-results", paths.probes], { stdout: () => {}, stderr: () => {} })).toBe(0);
     expect(readFileSync(paths.sheet, "utf8")).toBe(sheet);
     expect(readFileSync(paths.integration, "utf8")).toBe(integration);
+  });
+
+  it("preserves prepared Claude include aliases through commit", () => {
+    const paths = fixture();
+    writeFileSync(paths.integration, "operator notes\n@~/.claude/pstack-models.md\n");
+    const args = prepareArgs(paths);
+    args[args.indexOf("codex")] = "claude";
+    expect(main(args, { stdout: () => {}, stderr: () => {} })).toBe(0);
+    const plan = JSON.parse(readFileSync(paths.plan, "utf8"));
+    plan.sheetAliases.push("~/.claude/pstack-models.md");
+    writeFileSync(paths.plan, `${JSON.stringify(plan, null, 2)}\n`);
+    writePassingProbes(paths);
+
+    expect(main(["commit", "--plan", paths.plan, "--probe-results", paths.probes], { stdout: () => {}, stderr: () => {} })).toBe(0);
+    const integration = readFileSync(paths.integration, "utf8");
+    expect(integration).toBe(`operator notes\n@${paths.sheet}\n`);
   });
 });

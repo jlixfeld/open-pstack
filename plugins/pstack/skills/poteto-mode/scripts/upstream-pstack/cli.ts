@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import {
   compareUpstream,
   renderComparison,
@@ -16,6 +17,8 @@ export interface CliOptions {
   readonly repo: string | null;
   readonly upstreamFile: string | null;
 }
+
+export const DEFAULT_UPSTREAM_PATH = fileURLToPath(new URL("../../../../../../UPSTREAM.md", import.meta.url));
 
 export function parseArgs(argv: readonly string[]): CliOptions {
   let upstreamRef: string | null = null;
@@ -72,11 +75,7 @@ async function readUpstream(
   requestedPath: string | null
 ): Promise<string> {
   if (requestedPath !== null) return runtime.readFile(requestedPath);
-  try {
-    return await runtime.readFile("UPSTREAM.md");
-  } catch {
-    return runtime.readFile("../../../../../UPSTREAM.md");
-  }
+  return runtime.readFile(DEFAULT_UPSTREAM_PATH);
 }
 
 export async function main(

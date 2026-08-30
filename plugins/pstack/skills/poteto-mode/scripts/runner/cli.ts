@@ -3,6 +3,7 @@ import { resolvedOptions, runLane } from "./run.ts";
 import {
   ACCESS_MODES,
   EFFORTS,
+  MODEL_EFFORTS,
   PARENTS,
   PROVIDERS,
   type AccessMode,
@@ -94,11 +95,18 @@ export function parseArgs(argv: readonly string[]): RunnerOptions | null {
   ) {
     throw new UsageError("timeout must be a number greater than zero");
   }
+  const provider = oneOf("provider", stringValue(parsed.values.provider), PROVIDERS) as Provider;
+  const model = required("model", stringValue(parsed.values.model));
+  const effort = oneOf("effort", stringValue(parsed.values.effort), EFFORTS) as Effort;
+  const selectable = MODEL_EFFORTS[`${provider}:${model}` as keyof typeof MODEL_EFFORTS];
+  if (selectable === undefined || !(selectable as readonly Effort[]).includes(effort)) {
+    throw new UsageError(`unsupported model or effort: ${provider}:${model}@${effort}`);
+  }
   return resolvedOptions({
     parent: oneOf("parent", stringValue(parsed.values.parent), PARENTS) as Parent,
-    provider: oneOf("provider", stringValue(parsed.values.provider), PROVIDERS) as Provider,
-    model: required("model", stringValue(parsed.values.model)),
-    effort: oneOf("effort", stringValue(parsed.values.effort), EFFORTS) as Effort,
+    provider,
+    model,
+    effort,
     mode,
     promptPath: required("prompt", stringValue(parsed.values.prompt)),
     cwd: required("cwd", stringValue(parsed.values.cwd)),

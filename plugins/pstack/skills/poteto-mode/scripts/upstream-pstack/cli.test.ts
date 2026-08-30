@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { main, recordedCommit, type CliRuntime } from "./cli.ts";
+import { DEFAULT_UPSTREAM_PATH, main, recordedCommit, type CliRuntime } from "./cli.ts";
 import type { GitClient } from "./git.ts";
 import type { GitHubIssueClient } from "./github.ts";
 import type { IssueTransition } from "./issues.ts";
@@ -90,7 +90,7 @@ describe("main", () => {
     expect(test.stdout.join("")).toContain("history=diverged");
   });
 
-  it("finds UPSTREAM.md from the scripts directory when the current directory lacks it", async () => {
+  it("reads the repository UPSTREAM.md independently of the current directory", async () => {
     const paths: string[] = [];
     const git = {
       async fetchCursorDefaultBranch() {
@@ -113,12 +113,11 @@ describe("main", () => {
       git,
       readFile: async (path) => {
         paths.push(path);
-        if (path === "UPSTREAM.md") throw new Error("not in this directory");
         return `| Commit | \`${BASE}\` |\n`;
       },
     });
     expect(await main([], test.runtime)).toBe(0);
-    expect(paths).toEqual(["UPSTREAM.md", "../../../../../UPSTREAM.md"]);
+    expect(paths).toEqual([DEFAULT_UPSTREAM_PATH]);
   });
 });
 

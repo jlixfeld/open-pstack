@@ -72,7 +72,9 @@ plugins/pstack/skills/poteto-mode/scripts/
     pstack-setup
   upstream-pstack/
     compare.ts
+    facts.ts
     git.ts
+    github.ts
     issues.ts
     cli.ts
     pstack-upstream
@@ -84,7 +86,7 @@ plugins/pstack/skills/poteto-mode/scripts/
 
 The Terra candidate is the base because it puts the role map at the center and keeps the implementation small enough for one reviewable change. The Sol candidate contributed the canonical Markdown manifest, family-specific `ultra` support, the `pool` role shape, the real prepare and commit boundary, the stale-baseline check, and blob-based issue reconciliation.
 
-The design rejects plan files, proof bundles, a filesystem journal, crash-recovery state, and a broad branded wire taxonomy. Those mechanisms add a second subsystem without improving the requested probe-failure and rollback guarantees. Probe outputs and receipts remain evidence, not active setup state.
+The design uses one short-lived private plan to bind preview, probes, and commit. It rejects long-lived proof bundles, a filesystem journal, crash-recovery state, and a broad branded wire taxonomy. Those mechanisms add a second subsystem without improving the requested probe-failure and rollback guarantees. Probe outputs and receipts remain evidence, not active setup state.
 
 ## Tradeoffs accepted
 

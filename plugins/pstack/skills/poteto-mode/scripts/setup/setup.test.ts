@@ -60,10 +60,21 @@ describe("prepare setup", () => {
       sheet: { path: "sheet", bytes: null },
       integration: { path: "integration", bytes: integration === null ? null : encoder.encode(integration) },
     });
-    expect(decoder.decode(make(null).targets[1].nextBytes)).toBe("@~/.claude/pstack-models.md\n");
-    expect(decoder.decode(make("before\n@~/.claude/pstack-models.md\n").targets[1].nextBytes)).toBe("before\n@~/.claude/pstack-models.md\n");
-    expect(decoder.decode(make("note @~/.claude/pstack-models.md in prose\n").targets[1].nextBytes)).toBe("note @~/.claude/pstack-models.md in prose\n@~/.claude/pstack-models.md\n");
-    expect(() => make("@~/.claude/pstack-models.md\n@~/.claude/pstack-models.md\n")).toThrow("duplicate Claude pstack include");
+    expect(decoder.decode(make(null).targets[1].nextBytes)).toBe("@sheet\n");
+    expect(decoder.decode(make("before\n@sheet\n").targets[1].nextBytes)).toBe("before\n@sheet\n");
+    expect(decoder.decode(make("note @sheet in prose\n").targets[1].nextBytes)).toBe("note @sheet in prose\n@sheet\n");
+    expect(() => make("@sheet\n@sheet\n")).toThrow("duplicate Claude pstack include");
+  });
+
+  it("replaces an equivalent legacy Claude include instead of appending a duplicate", () => {
+    const value = prepareSetup({
+      parent: "claude",
+      manifestMarkdown,
+      sheet: { path: "/Users/operator/.claude/pstack-models.md", bytes: null },
+      sheetAliases: ["/Users/operator/.claude/pstack-models.md", "~/.claude/pstack-models.md"],
+      integration: { path: "/Users/operator/.claude/CLAUDE.md", bytes: encoder.encode("before\n@~/.claude/pstack-models.md\n") },
+    });
+    expect(decoder.decode(value.targets[1].nextBytes)).toBe("before\n@/Users/operator/.claude/pstack-models.md\n");
   });
 
   it("rejects inconsistent Codex marker boundaries and replaces one exact block", () => {
