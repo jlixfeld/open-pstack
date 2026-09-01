@@ -91,7 +91,11 @@ Pass arguments as an argv array or quote every path. Never interpolate prompt te
 
 Grok authentication preflight has one bounded retry. If the first `grok models` result would be classified as unauthenticated, the runner waits five seconds and tries the same preflight once more. A second failure is terminal. The delay and second attempt share the runner's absolute deadline and cancellation latch, and the receipt keeps evidence from both attempts. Model execution is never retried.
 
-The parent tool sandbox still governs whether a subscribed child CLI can reach its credentials and network. Run setup's live probe from the actual parent profile. A blocked external CLI is a loud dropout, not a reason to elevate permissions or substitute a model silently.
+The parent tool sandbox still governs whether a subscribed child CLI can reach its credentials and network. Run setup's live probe from the actual parent profile.
+
+Codex on macOS has one scoped exception. Claude Code stores a normal `claude auth login` session in the macOS Keychain, which the Codex sandbox can block even when the user is logged in. When a Codex parent launches a Claude lane and the sandboxed preflight reports unauthenticated, rerun the exact `pstack-runner` invocation with `sandbox_permissions: "require_escalated"`. Ask the user to allow the runner to read the existing Claude CLI session, and suggest a prefix rule containing only the absolute `pstack-runner` executable path. Do not read, print, copy, or export the credential. If the elevated preflight still reports unauthenticated, or if the user rejects the request, record a genuine dropout. Do not retry or substitute a model.
+
+For every other credential or network failure, a blocked external CLI is a loud dropout. Do not elevate permissions or substitute a model silently.
 
 The parent invocation must itself be resumable background work:
 
