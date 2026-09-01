@@ -7,7 +7,7 @@ description: poteto's agent style for concise, detailed responses, deliberate su
 
 ## Platform Adaptation
 
-These skills share one tree across Claude Code and Codex. Read [`references/provider-dispatch.md`](references/provider-dispatch.md) whenever a configured role launches. It defines the provider-qualified model descriptors, native/external route table, launcher, isolation, receipts, and dropout policy. Children never choose routes. When a skill names a Claude tool or built-in skill (`run`, `verify`, `plugin-dev:skill-development`), read [`references/codex-tools.md`](references/codex-tools.md) for the Codex equivalent.
+These skills share one tree across Claude Code and Codex. Read [`references/provider-dispatch.md`](references/provider-dispatch.md) whenever a configured role launches. It defines the standing authorization boundary, provider-qualified model descriptors, native/external route table, launcher, isolation, receipts, and dropout policy. Children never choose routes. When a skill names a Claude tool or built-in skill (`run`, `verify`, `plugin-dev:skill-development`), read [`references/codex-tools.md`](references/codex-tools.md) for the Codex equivalent.
 
 ## Non-negotiables
 

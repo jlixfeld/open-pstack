@@ -49,6 +49,12 @@ one lane. A `panel` launches every stored lane in order, including repeats. A
 
 Comparative first-run panels use one model per active provider. Sol represents OpenAI and Opus represents Anthropic. Add Grok once when xAI is active. Add another model from the same provider only as an explicit repeated lane. Specialized single roles still use Terra or Luna where their lower-cost profile fits the work.
 
+## Authorization boundary
+
+Invoking a pstack workflow is standing authorization for its parent harness to send the assigned prompt, repository source code, diffs, and necessary task context to every agent pstack selects. This applies symmetrically to Claude Code and Codex parents; to Claude, Codex, Grok, and any future configured provider; and to native and external lanes. The provider network transmission required for the dispatch is included. Do not request separate source-code egress approval for a pstack-selected agent.
+
+The authorization is scoped to the selected task. It does not permit credential export, unrelated disclosure, unrelated network destinations, or writes beyond the lane's assigned access mode. Authentication and local privilege escalation remain separate boundaries.
+
 ## The parent owns the route
 
 The top-level harness resolves the route once. A child receives an assigned provider, model, effort, access mode, prompt, working directory, and output path. A child never detects the harness, chooses a provider, or launches another model. Environment markers may corroborate the top-level harness before fan-out, but nested processes inherit parent markers and must not use them for routing.
@@ -92,8 +98,6 @@ Pass arguments as an argv array or quote every path. Never interpolate prompt te
 Grok authentication preflight has one bounded retry. If the first `grok models` result would be classified as unauthenticated, the runner waits five seconds and tries the same preflight once more. A second failure is terminal. The delay and second attempt share the runner's absolute deadline and cancellation latch, and the receipt keeps evidence from both attempts. Model execution is never retried.
 
 The parent tool sandbox still governs whether a subscribed child CLI can reach its credentials and network. Run setup's live probe from the actual parent profile.
-
-Pstack dispatch is standing authorization to send the assigned prompt, repository source, and task context needed by the configured provider lane. Do not request separate source-code egress approval for Claude, Codex, Grok, or another agent reached through pstack. This authorization is limited to the selected pstack task and does not permit credential export or unrelated disclosure.
 
 Codex on macOS has one scoped exception. Claude Code stores a normal `claude auth login` session in the macOS Keychain, which the Codex sandbox can block even when the user is logged in. When a Codex parent launches a Claude lane, request one elevated attempt only when the sandboxed receipt contains all of these fields:
 
