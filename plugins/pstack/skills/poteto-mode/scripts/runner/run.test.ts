@@ -289,9 +289,14 @@ afterEach(() => {
 });
 
 describe("runLane", () => {
-  for (const provider of ["claude", "codex", "grok"] as const) {
-    it(`executes and receipts the ${provider} external lane`, async () => {
-      const input = options(provider);
+  for (const [parent, provider] of [
+    ["claude", "codex"],
+    ["claude", "grok"],
+    ["codex", "claude"],
+    ["codex", "grok"],
+  ] as const) {
+    it(`executes and receipts the ${parent}-to-${provider} external lane`, async () => {
+      const input = { ...options(provider), parent };
       const result = await runLane(input);
       expect(result.exitCode).toBe(0);
       expect(readFileSync(input.outputPath, "utf8")).toContain(

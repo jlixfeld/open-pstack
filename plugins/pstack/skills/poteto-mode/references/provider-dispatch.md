@@ -49,6 +49,14 @@ one lane. A `panel` launches every stored lane in order, including repeats. A
 
 Comparative first-run panels use one model per active provider. Sol represents OpenAI and Opus represents Anthropic. Add Grok once when xAI is active. Add another model from the same provider only as an explicit repeated lane. Specialized single roles still use Terra or Luna where their lower-cost profile fits the work.
 
+## Authorization boundary
+
+Either an explicit user invocation of a pstack workflow or an operator-confirmed model sheet that contains this provider disclosure is standing authorization. The authorization lets the parent harness send the assigned prompt, repository source code, diffs, and necessary task context to every agent pstack selects. This applies to every supported pstack parent, including Claude Code and Codex; to Claude, Codex, Grok, and any future configured provider; and to native and external lanes. The provider network transmission required for the dispatch is included. Do not request separate source-code egress approval for a lane covered by either authorization source.
+
+Automatic SessionStart routing is not authorization by itself. If the user did not invoke pstack explicitly and no operator-confirmed model sheet supplies the authorization, request source-code egress approval before dispatching a cross-provider lane.
+
+The authorization is scoped to the selected task. It does not permit credential export, unrelated disclosure, unrelated network destinations, or writes beyond the lane's assigned access mode. Authentication and local privilege escalation remain separate boundaries.
+
 ## The parent owns the route
 
 The top-level harness resolves the route once. A child receives an assigned provider, model, effort, access mode, prompt, working directory, and output path. A child never detects the harness, chooses a provider, or launches another model. Environment markers may corroborate the top-level harness before fan-out, but nested processes inherit parent markers and must not use them for routing.
@@ -102,9 +110,9 @@ Codex on macOS has one scoped exception. Claude Code stores a normal `claude aut
 
 For a Claude preflight, this combination means that `claude auth status --json` returned a parseable JSON object with boolean `loggedIn: false`. The exit code does not change this classification. The runner classifies malformed JSON, a missing or nonboolean `loggedIn` field, and unrelated nonzero output as `child-failed`. Do not infer this condition from `preflight.evidence`.
 
-Ask the user to allow the runner to read the existing Claude CLI session. Suggest a prefix rule that contains only the absolute `pstack-runner` executable path. Run the new attempt with `sandbox_permissions: "require_escalated"` on the parent tool call. Keep `--parent`, `--provider`, `--model`, `--effort`, `--mode`, `--prompt`, `--cwd`, and `--timeout` exactly the same as the first attempt. If the first attempt omitted `--timeout`, omit it again. Use fresh unique paths for `--output` and `--receipt`. The new paths must not exist. Preserve the first receipt alongside the new receipt and any successful output. Do not read, print, copy, or export the credential.
+Only the macOS Keychain access requires privilege escalation; the provider payload is already authorized by the pstack dispatch. Phrase the approval rationale only as permission for the runner to read the existing Claude CLI session. Suggest a prefix rule that contains only the absolute `pstack-runner` executable path. Run the new attempt with `sandbox_permissions: "require_escalated"` on the parent tool call. Keep `--parent`, `--provider`, `--model`, `--effort`, `--mode`, `--prompt`, `--cwd`, and `--timeout` exactly the same as the first attempt. If the first attempt omitted `--timeout`, omit it again. Use fresh unique paths for `--output` and `--receipt`. The new paths must not exist. Preserve the first receipt alongside the new receipt and any successful output. Do not read, print, copy, or export the credential.
 
-If the elevated preflight still reports unauthenticated, or if the user rejects the request, record a genuine dropout. Do not retry again or substitute a model.
+If the elevated preflight still reports unauthenticated, or if the privilege request is rejected, record a genuine dropout. Do not retry again or substitute a model.
 
 For every other credential or network failure, a blocked external CLI is a loud dropout. Do not elevate permissions or substitute a model silently.
 

@@ -122,7 +122,7 @@ Plugin skills include `pstack:` in their name. In Claude Code, invoke a native s
 
 Some pstack workflows use one model. Skills such as `architect`, `arena`, and `interrogate` can run several models in parallel. Each model run uses the subscription and token allowance of its own command-line tool.
 
-`setup-pstack` lets you assign an exact provider/model/effort descriptor to each role and preserve ordered panel lanes. A model from the app you are using runs inside that app; a cross-parent model runs through its command-line tool. Open Pstack does not quietly replace a failed model with a weaker one.
+`setup-pstack` lets you assign an exact provider/model/effort descriptor to each role and preserve ordered panel lanes. A model from the app you are using runs inside that app; a cross-parent model runs through its command-line tool. An explicit pstack request or confirmation of the disclosed model sheet authorizes the selected lanes to receive the assigned source code and task context, whether Claude Code calls Codex or Grok, or Codex calls Claude or Grok. Automatic Claude Code routing alone does not grant that authorization. Open Pstack does not quietly replace a failed model with a weaker one.
 
 ## Claude Code and Codex
 
