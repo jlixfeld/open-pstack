@@ -1,7 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { defaultRoleMap, renderRoleMap } from "../routing/role-map.ts";
+import {
+  ROLE_MAP_PREAMBLE,
+  defaultRoleMap,
+  renderRoleMap,
+} from "../routing/role-map.ts";
 import { parseManifest } from "../routing/manifest.ts";
 import { EFFORTS, MODEL_EFFORTS, type Effort } from "./types.ts";
 
@@ -11,6 +15,11 @@ const DISPATCH_PATH = join(
   "skills/poteto-mode/references/provider-dispatch.md"
 );
 const SETUP_PATH = join(PLUGIN_ROOT, "skills/setup-pstack/SKILL.md");
+const POTETO_MODE_PATH = join(PLUGIN_ROOT, "skills/poteto-mode/SKILL.md");
+const CODEX_TOOLS_PATH = join(
+  PLUGIN_ROOT,
+  "skills/poteto-mode/references/codex-tools.md"
+);
 const AGENTS_DIR = join(PLUGIN_ROOT, "agents");
 
 const MATRIX_HEADER = [
@@ -278,6 +287,8 @@ describe("model matrix", () => {
   it("keeps setup's first-run default panel copy aligned with the matrix", () => {
     const sheet = firstRunSheet(setup);
     expect(sheet).toBe(renderRoleMap(defaultRoleMap(manifest)));
+    expect(ROLE_MAP_PREAMBLE).toContain("standing authorization");
+    expect(ROLE_MAP_PREAMBLE).toContain("source-code egress approval");
     const roles = sheet
       .split("\n")
       .filter((line) => line.includes(": "))
@@ -408,18 +419,32 @@ describe("model matrix", () => {
     expect(externalLanes).toContain("still reports unauthenticated");
   });
 
-  it("treats pstack dispatch as standing authorization for provider context", () => {
+  it("treats every pstack-selected agent as authorized to receive task context", () => {
     const dispatch = readFileSync(DISPATCH_PATH, "utf8");
+    const authorizationStart = dispatch.indexOf("## Authorization boundary");
+    const routingStart = dispatch.indexOf("## The parent owns the route");
     const externalStart = dispatch.indexOf("## External lanes");
-    const completionStart = dispatch.indexOf("## Completion and dropouts");
-    const externalLanes = dispatch.slice(externalStart, completionStart);
-    expect(externalLanes).toContain("standing authorization");
-    expect(externalLanes).toContain("repository source");
-    expect(externalLanes).toContain(
+    expect(authorizationStart).toBeGreaterThan(-1);
+    expect(routingStart).toBeGreaterThan(authorizationStart);
+    expect(externalStart).toBeGreaterThan(routingStart);
+    const authorization = dispatch.slice(authorizationStart, routingStart);
+    expect(authorization).toContain("standing authorization");
+    expect(authorization).toContain("repository source code");
+    expect(authorization).toContain("diffs");
+    expect(authorization).toContain("Claude Code and Codex parents");
+    expect(authorization).toContain("Claude, Codex, Grok, and any future configured provider");
+    expect(authorization).toContain("native and external lanes");
+    expect(authorization).toContain(
       "Do not request separate source-code egress approval"
     );
-    expect(externalLanes).toContain(
-      "Only the macOS Keychain access requires privilege escalation"
+    expect(authorization).toContain(
+      "writes beyond the lane's assigned access mode"
+    );
+    expect(readFileSync(POTETO_MODE_PATH, "utf8")).toContain(
+      "authorization boundary"
+    );
+    expect(readFileSync(CODEX_TOOLS_PATH, "utf8")).toContain(
+      "authorization boundary"
     );
   });
 });
