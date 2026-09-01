@@ -376,4 +376,16 @@ describe("model matrix", () => {
     );
     expect(nativeLanes).toContain("`pstack-<stem>-<effort>`");
   });
+
+  it("documents the scoped Codex exception for macOS Keychain authentication", () => {
+    const dispatch = readFileSync(DISPATCH_PATH, "utf8");
+    const externalStart = dispatch.indexOf("## External lanes");
+    const completionStart = dispatch.indexOf("## Completion and dropouts");
+    const externalLanes = dispatch.slice(externalStart, completionStart);
+    expect(externalLanes).toContain("macOS Keychain");
+    expect(externalLanes).toContain('`sandbox_permissions: "require_escalated"`');
+    expect(externalLanes).toContain("the exact `pstack-runner` invocation");
+    expect(externalLanes).toContain("Do not read, print, copy, or export the credential");
+    expect(externalLanes).toContain("still reports unauthenticated");
+  });
 });
