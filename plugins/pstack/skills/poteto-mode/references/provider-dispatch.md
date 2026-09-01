@@ -93,7 +93,18 @@ Grok authentication preflight has one bounded retry. If the first `grok models` 
 
 The parent tool sandbox still governs whether a subscribed child CLI can reach its credentials and network. Run setup's live probe from the actual parent profile.
 
-Codex on macOS has one scoped exception. Claude Code stores a normal `claude auth login` session in the macOS Keychain, which the Codex sandbox can block even when the user is logged in. When a Codex parent launches a Claude lane and the sandboxed preflight reports unauthenticated, rerun the exact `pstack-runner` invocation with `sandbox_permissions: "require_escalated"`. Ask the user to allow the runner to read the existing Claude CLI session, and suggest a prefix rule containing only the absolute `pstack-runner` executable path. Do not read, print, copy, or export the credential. If the elevated preflight still reports unauthenticated, or if the user rejects the request, record a genuine dropout. Do not retry or substitute a model.
+Codex on macOS has one scoped exception. Claude Code stores a normal `claude auth login` session in the macOS Keychain, which the Codex sandbox can block even when the user is logged in. When a Codex parent launches a Claude lane, request one elevated attempt only when the sandboxed receipt contains all of these fields:
+
+- `parent: "codex"`
+- `provider: "claude"`
+- `status: "unauthenticated"`
+- `preflight.status: "failed"`
+
+For a Claude preflight, this combination means that `claude auth status --json` returned a parseable JSON object with boolean `loggedIn: false`. The exit code does not change this classification. The runner classifies malformed JSON, a missing or nonboolean `loggedIn` field, and unrelated nonzero output as `child-failed`. Do not infer this condition from `preflight.evidence`.
+
+Ask the user to allow the runner to read the existing Claude CLI session. Suggest a prefix rule that contains only the absolute `pstack-runner` executable path. Run the new attempt with `sandbox_permissions: "require_escalated"` on the parent tool call. Keep `--parent`, `--provider`, `--model`, `--effort`, `--mode`, `--prompt`, `--cwd`, and `--timeout` exactly the same as the first attempt. If the first attempt omitted `--timeout`, omit it again. Use fresh unique paths for `--output` and `--receipt`. The new paths must not exist. Preserve the first receipt alongside the new receipt and any successful output. Do not read, print, copy, or export the credential.
+
+If the elevated preflight still reports unauthenticated, or if the user rejects the request, record a genuine dropout. Do not retry again or substitute a model.
 
 For every other credential or network failure, a blocked external CLI is a loud dropout. Do not elevate permissions or substitute a model silently.
 

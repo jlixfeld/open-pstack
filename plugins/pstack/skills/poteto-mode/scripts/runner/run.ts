@@ -349,36 +349,25 @@ async function waitForGrokPreflightRetry(
   }
 }
 
-function preflightPassed(provider: Provider, model: string, result: ProcessResult): boolean {
-  if (result.exitCode !== 0 || result.timedOut) return false;
-  const combined = `${result.stdout}\n${result.stderr}`;
-  switch (provider) {
-    case "claude": {
-      try {
-        const value: unknown = JSON.parse(result.stdout);
-        return (
-          value !== null &&
-          typeof value === "object" &&
-          (value as { loggedIn?: unknown }).loggedIn === true
-        );
-      } catch {
-        return false;
-      }
-    }
-    case "codex":
-      return /logged in/i.test(combined);
-    case "grok":
-      return /logged in/i.test(combined) && combined.includes(model);
-  }
-}
-
 function successfulPreflightEvidence(provider: Provider, model: string): string {
   return provider === "grok"
     ? `authenticated; model ${model} available`
     : "authenticated";
 }
 
-function unavailableStatus(value: string): ReceiptStatus {
+type ClassifiedFailureStatus = Extract<
+  ReceiptStatus,
+  "unauthenticated" | "unavailable-model" | "child-failed"
+>;
+
+type PreflightAssessment =
+  | { readonly kind: "passed" }
+  | {
+      readonly kind: "failed";
+      readonly receiptStatus: ClassifiedFailureStatus;
+    };
+
+function unavailableStatus(value: string): ClassifiedFailureStatus {
   if (/not logged in|unauthenticated|authentication|sign in|login required/i.test(value)) {
     return "unauthenticated";
   }
@@ -388,16 +377,62 @@ function unavailableStatus(value: string): ReceiptStatus {
   return "child-failed";
 }
 
-function preflightFailureStatus(
+function assessPreflight(
   provider: Provider,
   model: string,
-  value: string
-): ReceiptStatus {
-  const status = unavailableStatus(value);
-  if (status !== "child-failed") return status;
-  return provider === "grok" && !value.includes(model)
-    ? "unavailable-model"
-    : "unauthenticated";
+  result: ProcessResult
+): PreflightAssessment {
+  const combined = `${result.stdout}\n${result.stderr}`;
+  const failureEvidence = evidence(combined);
+  switch (provider) {
+    case "claude": {
+      try {
+        const value: unknown = JSON.parse(result.stdout);
+        if (value !== null && typeof value === "object" && "loggedIn" in value) {
+          if (value.loggedIn === false) {
+            return { kind: "failed", receiptStatus: "unauthenticated" };
+          }
+          if (
+            value.loggedIn === true &&
+            result.exitCode === 0 &&
+            !result.timedOut
+          ) {
+            return { kind: "passed" };
+          }
+        }
+      } catch {}
+      return { kind: "failed", receiptStatus: "child-failed" };
+    }
+    case "codex": {
+      if (result.exitCode === 0 && !result.timedOut && /logged in/i.test(combined)) {
+        return { kind: "passed" };
+      }
+      const status = unavailableStatus(failureEvidence);
+      return {
+        kind: "failed",
+        receiptStatus: status === "child-failed" ? "unauthenticated" : status,
+      };
+    }
+    case "grok": {
+      if (
+        result.exitCode === 0 &&
+        !result.timedOut &&
+        /logged in/i.test(combined) &&
+        combined.includes(model)
+      ) {
+        return { kind: "passed" };
+      }
+      const status = unavailableStatus(failureEvidence);
+      return {
+        kind: "failed",
+        receiptStatus: status === "child-failed"
+          ? failureEvidence.includes(model)
+            ? "unauthenticated"
+            : "unavailable-model"
+          : status,
+      };
+    }
+  }
 }
 
 function retriedPreflightEvidence(
@@ -619,18 +654,21 @@ async function executeLane(
     cancellation
   );
   let rawPreflightEvidence = evidence(`${preflightResult.stdout}\n${preflightResult.stderr}`);
-  let passed = preflightPassed(options.provider, options.model, preflightResult);
-  let preflightEvidence = passed
+  let preflightAssessment = assessPreflight(
+    options.provider,
+    options.model,
+    preflightResult
+  );
+  let preflightEvidence = preflightAssessment.kind === "passed"
     ? successfulPreflightEvidence(options.provider, options.model)
     : rawPreflightEvidence;
 
   if (
     options.provider === "grok" &&
-    !passed &&
+    preflightAssessment.kind === "failed" &&
     preflightResult.cancelledBy === null &&
     !preflightResult.timedOut &&
-    preflightFailureStatus(options.provider, options.model, rawPreflightEvidence) ===
-      "unauthenticated"
+    preflightAssessment.receiptStatus === "unauthenticated"
   ) {
     preflightState = {
       argv: [preflightExecutable, ...preflight.args],
@@ -663,13 +701,18 @@ async function executeLane(
       cancellation
     );
     rawPreflightEvidence = evidence(`${preflightResult.stdout}\n${preflightResult.stderr}`);
-    passed = preflightPassed(options.provider, options.model, preflightResult);
+    preflightAssessment = assessPreflight(
+      options.provider,
+      options.model,
+      preflightResult
+    );
+    const secondPassed = preflightAssessment.kind === "passed";
     preflightEvidence = retriedPreflightEvidence(
       firstPreflightEvidence,
-      passed
+      secondPassed
         ? successfulPreflightEvidence(options.provider, options.model)
         : rawPreflightEvidence,
-      passed
+      secondPassed
     );
   }
 
@@ -679,7 +722,7 @@ async function executeLane(
       ? "cancelled"
       : preflightResult.timedOut
         ? "timed-out"
-        : passed
+        : preflightAssessment.kind === "passed"
           ? "passed"
           : "failed",
     evidence: preflightEvidence,
@@ -688,11 +731,9 @@ async function executeLane(
 
   if (preflightState.status !== "passed") {
     const completed = Date.now();
-    const preflightFailure = preflightFailureStatus(
-      options.provider,
-      options.model,
-      rawPreflightEvidence
-    );
+    const preflightFailure = preflightAssessment.kind === "failed"
+      ? preflightAssessment.receiptStatus
+      : "child-failed";
     const status: ReceiptStatus = preflightResult.cancelledBy !== null
       ? "cancelled"
       : preflightResult.timedOut
