@@ -20,6 +20,7 @@ const CODEX_TOOLS_PATH = join(
   PLUGIN_ROOT,
   "skills/poteto-mode/references/codex-tools.md"
 );
+const SESSION_START_PATH = join(PLUGIN_ROOT, "hooks/session-start-context.md");
 const AGENTS_DIR = join(PLUGIN_ROOT, "agents");
 
 const MATRIX_HEADER = [
@@ -419,7 +420,7 @@ describe("model matrix", () => {
     expect(externalLanes).toContain("still reports unauthenticated");
   });
 
-  it("treats every pstack-selected agent as authorized to receive task context", () => {
+  it("requires user acknowledgment before provider context transmission", () => {
     const dispatch = readFileSync(DISPATCH_PATH, "utf8");
     const authorizationStart = dispatch.indexOf("## Authorization boundary");
     const routingStart = dispatch.indexOf("## The parent owns the route");
@@ -429,6 +430,11 @@ describe("model matrix", () => {
     expect(externalStart).toBeGreaterThan(routingStart);
     const authorization = dispatch.slice(authorizationStart, routingStart);
     expect(authorization).toContain("standing authorization");
+    expect(authorization).toContain("explicit user invocation");
+    expect(authorization).toContain("operator-confirmed model sheet");
+    expect(authorization).toContain(
+      "Automatic SessionStart routing is not authorization"
+    );
     expect(authorization).toContain("repository source code");
     expect(authorization).toContain("diffs");
     expect(authorization).toContain("every supported pstack parent");
@@ -446,6 +452,12 @@ describe("model matrix", () => {
     );
     expect(readFileSync(CODEX_TOOLS_PATH, "utf8")).toContain(
       "authorization boundary"
+    );
+    expect(ROLE_MAP_PREAMBLE).toContain(
+      "Confirming this model sheet is standing authorization"
+    );
+    expect(readFileSync(SESSION_START_PATH, "utf8")).toContain(
+      "does not authorize provider egress"
     );
   });
 });

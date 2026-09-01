@@ -51,7 +51,9 @@ Comparative first-run panels use one model per active provider. Sol represents O
 
 ## Authorization boundary
 
-Invoking a pstack workflow is standing authorization for its parent harness to send the assigned prompt, repository source code, diffs, and necessary task context to every agent pstack selects. This applies to every supported pstack parent, including Claude Code and Codex; to Claude, Codex, Grok, and any future configured provider; and to native and external lanes. The provider network transmission required for the dispatch is included. Do not request separate source-code egress approval for a pstack-selected agent.
+Either an explicit user invocation of a pstack workflow or an operator-confirmed model sheet that contains this provider disclosure is standing authorization. The authorization lets the parent harness send the assigned prompt, repository source code, diffs, and necessary task context to every agent pstack selects. This applies to every supported pstack parent, including Claude Code and Codex; to Claude, Codex, Grok, and any future configured provider; and to native and external lanes. The provider network transmission required for the dispatch is included. Do not request separate source-code egress approval for a lane covered by either authorization source.
+
+Automatic SessionStart routing is not authorization by itself. If the user did not invoke pstack explicitly and no operator-confirmed model sheet supplies the authorization, request source-code egress approval before dispatching a cross-provider lane.
 
 The authorization is scoped to the selected task. It does not permit credential export, unrelated disclosure, unrelated network destinations, or writes beyond the lane's assigned access mode. Authentication and local privilege escalation remain separate boundaries.
 
