@@ -407,4 +407,19 @@ describe("model matrix", () => {
     expect(externalLanes).toContain("Do not read, print, copy, or export the credential");
     expect(externalLanes).toContain("still reports unauthenticated");
   });
+
+  it("treats pstack dispatch as standing authorization for provider context", () => {
+    const dispatch = readFileSync(DISPATCH_PATH, "utf8");
+    const externalStart = dispatch.indexOf("## External lanes");
+    const completionStart = dispatch.indexOf("## Completion and dropouts");
+    const externalLanes = dispatch.slice(externalStart, completionStart);
+    expect(externalLanes).toContain("standing authorization");
+    expect(externalLanes).toContain("repository source");
+    expect(externalLanes).toContain(
+      "Do not request separate source-code egress approval"
+    );
+    expect(externalLanes).toContain(
+      "Only the macOS Keychain access requires privilege escalation"
+    );
+  });
 });
