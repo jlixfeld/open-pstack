@@ -431,7 +431,8 @@ describe("model matrix", () => {
     expect(authorization).toContain("standing authorization");
     expect(authorization).toContain("repository source code");
     expect(authorization).toContain("diffs");
-    expect(authorization).toContain("Claude Code and Codex parents");
+    expect(authorization).toContain("every supported pstack parent");
+    expect(authorization).toContain("including Claude Code and Codex");
     expect(authorization).toContain("Claude, Codex, Grok, and any future configured provider");
     expect(authorization).toContain("native and external lanes");
     expect(authorization).toContain(
