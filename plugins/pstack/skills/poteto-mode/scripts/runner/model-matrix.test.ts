@@ -384,7 +384,26 @@ describe("model matrix", () => {
     const externalLanes = dispatch.slice(externalStart, completionStart);
     expect(externalLanes).toContain("macOS Keychain");
     expect(externalLanes).toContain('`sandbox_permissions: "require_escalated"`');
-    expect(externalLanes).toContain("the exact `pstack-runner` invocation");
+    expect(externalLanes).toContain('`parent: "codex"`');
+    expect(externalLanes).toContain('`provider: "claude"`');
+    expect(externalLanes).toContain('`status: "unauthenticated"`');
+    expect(externalLanes).toContain('`preflight.status: "failed"`');
+    expect(externalLanes).not.toContain('`exitCode: 0`');
+    expect(externalLanes).toContain(
+      "returned a parseable JSON object with boolean `loggedIn: false`"
+    );
+    expect(externalLanes).toContain("The exit code does not change this classification");
+    expect(externalLanes).toContain(
+      "Do not infer this condition from `preflight.evidence`"
+    );
+    expect(externalLanes).toContain(
+      "Keep `--parent`, `--provider`, `--model`, `--effort`, `--mode`, `--prompt`, `--cwd`, and `--timeout` exactly the same"
+    );
+    expect(externalLanes).toContain(
+      "Use fresh unique paths for `--output` and `--receipt`"
+    );
+    expect(externalLanes).toContain("The new paths must not exist");
+    expect(externalLanes).toContain("Preserve the first receipt");
     expect(externalLanes).toContain("Do not read, print, copy, or export the credential");
     expect(externalLanes).toContain("still reports unauthenticated");
   });

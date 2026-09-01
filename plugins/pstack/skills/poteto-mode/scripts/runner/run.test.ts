@@ -58,6 +58,26 @@ if (name === "claude" && args[0] === "auth") {
   if (process.env.FAKE_REMOVE_EXECUTABLE_AFTER_PREFLIGHT === "1") {
     unlinkSync(process.argv[1]);
   }
+  switch (process.env.FAKE_CLAUDE_PREFLIGHT) {
+    case "logged-out":
+      console.log(JSON.stringify({loggedIn:false}));
+      process.exit(0);
+    case "malformed":
+      console.log("{");
+      process.exit(0);
+    case "missing-logged-in":
+      console.log(JSON.stringify({}));
+      process.exit(0);
+    case "nonboolean-logged-in":
+      console.log(JSON.stringify({loggedIn:"false"}));
+      process.exit(0);
+    case "logged-out-nonzero":
+      console.log(JSON.stringify({loggedIn:false}));
+      process.exit(1);
+    case "unrelated-nonzero":
+      console.error("unexpected command failure");
+      process.exit(1);
+  }
   console.log(JSON.stringify({loggedIn:true}));
   process.exit(0);
 }
@@ -232,6 +252,7 @@ beforeEach(() => {
   delete process.env.FAKE_MODEL_STARTED_PATH;
   delete process.env.FAKE_MODEL_EXITING_PATH;
   delete process.env.FAKE_REMOVE_EXECUTABLE_AFTER_PREFLIGHT;
+  delete process.env.FAKE_CLAUDE_PREFLIGHT;
   delete process.env.FAKE_GROK_UNAUTH;
   delete process.env.FAKE_GROK_TRANSIENT_UNAUTH_PATH;
   delete process.env.FAKE_GROK_PREFLIGHT_LOG_PATH;
@@ -256,6 +277,7 @@ afterEach(() => {
   delete process.env.FAKE_MODEL_STARTED_PATH;
   delete process.env.FAKE_MODEL_EXITING_PATH;
   delete process.env.FAKE_REMOVE_EXECUTABLE_AFTER_PREFLIGHT;
+  delete process.env.FAKE_CLAUDE_PREFLIGHT;
   delete process.env.FAKE_GROK_UNAUTH;
   delete process.env.FAKE_GROK_TRANSIENT_UNAUTH_PATH;
   delete process.env.FAKE_GROK_PREFLIGHT_LOG_PATH;
@@ -312,6 +334,106 @@ describe("runLane", () => {
       modelVerified: false,
       modelEvidence: null,
     });
+  });
+
+  it("classifies a successful Claude logged-out preflight as unauthenticated", async () => {
+    process.env.FAKE_CLAUDE_PREFLIGHT = "logged-out";
+    const modelStarted = join(scratch, "claude-logged-out-model.started");
+    process.env.FAKE_MODEL_STARTED_PATH = modelStarted;
+    const input = options("claude", "claude-logged-out");
+
+    const result = await runLane(input);
+
+    expect(result.exitCode).toBe(77);
+    expect(existsSync(modelStarted)).toBe(false);
+    expect(existsSync(input.outputPath)).toBe(false);
+    expect(receipt(input.receiptPath)).toMatchObject({
+      status: "unauthenticated",
+      exitCode: 0,
+      preflight: { status: "failed" },
+    });
+  });
+
+  for (const [mode, label] of [
+    ["malformed", "malformed JSON"],
+    ["missing-logged-in", "a missing loggedIn field"],
+    ["nonboolean-logged-in", "a nonboolean loggedIn field"],
+  ]) {
+    it(`classifies a successful Claude preflight with ${label} as child-failed`, async () => {
+      process.env.FAKE_CLAUDE_PREFLIGHT = mode;
+      const modelStarted = join(scratch, `${mode}-model.started`);
+      process.env.FAKE_MODEL_STARTED_PATH = modelStarted;
+      const input = options("claude", mode);
+
+      const result = await runLane(input);
+
+      expect(result.exitCode).toBe(70);
+      expect(existsSync(modelStarted)).toBe(false);
+      expect(existsSync(input.outputPath)).toBe(false);
+      expect(receipt(input.receiptPath)).toMatchObject({
+        status: "child-failed",
+        exitCode: 0,
+        preflight: { status: "failed" },
+      });
+    });
+  }
+
+  it("classifies a nonzero Claude logged-out preflight as unauthenticated", async () => {
+    process.env.FAKE_CLAUDE_PREFLIGHT = "logged-out-nonzero";
+    const modelStarted = join(scratch, "claude-nonzero-model.started");
+    process.env.FAKE_MODEL_STARTED_PATH = modelStarted;
+    const input = options("claude", "claude-logged-out-nonzero");
+
+    const result = await runLane(input);
+
+    expect(result.exitCode).toBe(77);
+    expect(existsSync(modelStarted)).toBe(false);
+    expect(existsSync(input.outputPath)).toBe(false);
+    expect(receipt(input.receiptPath)).toMatchObject({
+      status: "unauthenticated",
+      exitCode: 1,
+      preflight: { status: "failed" },
+    });
+  });
+
+  it("classifies unrelated nonzero Claude preflight output as child-failed", async () => {
+    process.env.FAKE_CLAUDE_PREFLIGHT = "unrelated-nonzero";
+    const modelStarted = join(scratch, "claude-unrelated-nonzero-model.started");
+    process.env.FAKE_MODEL_STARTED_PATH = modelStarted;
+    const input = options("claude", "claude-unrelated-nonzero");
+
+    const result = await runLane(input);
+
+    expect(result.exitCode).toBe(70);
+    expect(existsSync(modelStarted)).toBe(false);
+    expect(existsSync(input.outputPath)).toBe(false);
+    expect(receipt(input.receiptPath)).toMatchObject({
+      status: "child-failed",
+      exitCode: 1,
+      preflight: { status: "failed" },
+    });
+  });
+
+  it("runs the same Claude lane with fresh artifact paths and preserves the first receipt", async () => {
+    process.env.FAKE_CLAUDE_PREFLIGHT = "logged-out";
+    const first = options("claude", "claude-sandboxed");
+    expect((await runLane(first)).exitCode).toBe(77);
+    const firstReceipt = readFileSync(first.receiptPath, "utf8");
+
+    delete process.env.FAKE_CLAUDE_PREFLIGHT;
+    const second: RunnerOptions = {
+      ...first,
+      outputPath: join(scratch, "claude-elevated.out"),
+      receiptPath: join(scratch, "claude-elevated.receipt.json"),
+    };
+    expect((await runLane(second)).exitCode).toBe(0);
+
+    expect(second.outputPath).not.toBe(first.outputPath);
+    expect(second.receiptPath).not.toBe(first.receiptPath);
+    expect(existsSync(first.outputPath)).toBe(false);
+    expect(readFileSync(first.receiptPath, "utf8")).toBe(firstReceipt);
+    expect(receipt(second.receiptPath).status).toBe("complete");
+    expect(readFileSync(second.outputPath, "utf8")).toContain("CLAUDE_OK");
   });
 
   it("retries a contradictory Grok authentication preflight before running the model", async () => {
