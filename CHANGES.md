@@ -8,6 +8,10 @@ The routing manifest now lists Fable, Sol, Terra, Luna, Grok, and Opus with fami
 
 A read-only Cursor monitor compares the recorded Cursor commit with the current `cursor/plugins` default branch only under `pstack/`. The local command reports changed files and blob-backed overlap with fork-specific changes. A weekly, manually dispatchable workflow reconciles one tracking issue and never applies upstream changes. The documented backport process keeps Cursor changes separate from direct `port-upstream` updates.
 
+## 1.2.2 makes PR lifecycle playbooks forge-neutral
+
+The Babysit, Shipping, autopilot, planning, and PR-opening playbooks now default to `gh` and use Origin only when its CLI is installed and resolves the repository. Base branches define stacks, so Graphite is no longer required. Shipping verifies verdict base SHA, head SHA, and patch-id, prepares and merges only the current bottom PR, waits for actual merge completion, and recomputes the chain after each merge. The GitHub-only public watcher remains unchanged.
+
 ## 1.2.1 adds Claude Fable 5.1 routing
 
 Fable now uses the supported API identifier `claude-fable-5-1` across the provider matrix, runner validation, and Claude-native agents. The first-run map sends hardest tasks to Fable 5.1 at `max`, the level reserved for work where correctness outweighs cost. How critics and Interrogate pair Sol with Fable 5.1 at `xhigh`, so each panel keeps one model per provider and both review roles retain the documented headroom to raise effort when the work warrants it.

@@ -115,6 +115,84 @@ else
   note "ok: babysit Bugbot binding on the packaged plugin"
 fi
 
+forge_files=(
+  "$plugin/skills/poteto-mode/playbooks/autopilot-full.md"
+  "$plugin/skills/poteto-mode/playbooks/autopilot-stack.md"
+  "$plugin/skills/poteto-mode/playbooks/babysit.md"
+  "$plugin/skills/poteto-mode/playbooks/multi-phase-plan.md"
+  "$plugin/skills/poteto-mode/playbooks/opening-a-pr.md"
+  "$plugin/skills/poteto-mode/playbooks/shipping.md"
+)
+forge_bad=""
+for forge_file in "${forge_files[@]}"; do
+  if ! grep -Fq 'Never require Graphite (`gt`).' "$forge_file" && ! grep -Fq 'Never require `gt`.' "$forge_file" && ! grep -Fq 'Do not require Graphite (`gt`).' "$forge_file"; then
+    forge_bad="${forge_bad}${forge_file} does not make Graphite optional"$'\n'
+  fi
+  if ! grep -Fq 'command -v origin' "$forge_file"; then
+    forge_bad="${forge_bad}${forge_file} does not resolve Origin before selecting the forge"$'\n'
+  fi
+done
+for forge_file in "${forge_files[@]}"; do
+  if grep -Eq 'gt (submit|restack|sync|track|merge)' "$forge_file"; then
+    forge_bad="${forge_bad}${forge_file} still invokes Graphite"$'\n'
+  fi
+done
+shipping="$plugin/skills/poteto-mode/playbooks/shipping.md"
+for shipping_invariant in \
+  'Prepare only the bottom PR.' \
+  'Do not retarget, arm, or merge descendants yet.' \
+  'verdict head SHA, base SHA, and stable `git patch-id`' \
+  'Wait for that PR to merge before preparing the next one.' \
+  'Recompute after every merge.' \
+  'mergedAt` is non-null or `state` is `MERGED`'; do
+  if ! grep -Fq "$shipping_invariant" "$shipping"; then
+    forge_bad="${forge_bad}shipping lost invariant: $shipping_invariant"$'\n'
+  fi
+done
+for stack_invariant in \
+  'A stack is a base-branch chain.' \
+  'Only the root PR targets trunk.'; do
+  if ! grep -Fq "$stack_invariant" "$plugin/skills/poteto-mode/playbooks/opening-a-pr.md" "$plugin/skills/poteto-mode/playbooks/autopilot-stack.md"; then
+    forge_bad="${forge_bad}base-branch stack invariant missing: $stack_invariant"$'\n'
+  fi
+done
+if [ -n "$forge_bad" ]; then
+  note "FAIL: forge-neutral PR lifecycle invariants"
+  note "$forge_bad"
+  fail=1
+else
+  note "ok: forge-neutral PR lifecycle keeps Graphite optional and waits for completed bottom-up merges"
+fi
+
+multi_phase="$plugin/skills/poteto-mode/playbooks/multi-phase-plan.md"
+opening_pr="$plugin/skills/poteto-mode/playbooks/opening-a-pr.md"
+stack_rebase_bad=""
+for blanket_rebase in \
+  'Rebase onto current trunk before babysit and again before the merge-ready report.' \
+  'Rebased onto current trunk after the verdict, patch-id unchanged.'; do
+  if grep -Fq "$blanket_rebase" "$multi_phase"; then
+    stack_rebase_bad="${stack_rebase_bad}multi-phase plan still rebases every stacked PR onto trunk"$'\n'
+  fi
+done
+if grep -Fq 'Rebase on trunk before substantial stack work.' "$opening_pr"; then
+  stack_rebase_bad="${stack_rebase_bad}opening-a-pr still gives every stacked child a trunk rebase"$'\n'
+fi
+for stack_rebase_invariant in \
+  'Rebase a root PR onto current trunk. Rebase a stack child onto its parent'\''s exact tip.' \
+  'After any rewritten push, compare the base-to-head patch-id and rerun mergeability and CI.' \
+  'Rebase root PRs on trunk. Rebase child PRs on their parent'\''s exact tip. For an existing chain, rebase it bottom-to-top.'; do
+  if ! grep -Fq "$stack_rebase_invariant" "$multi_phase" "$opening_pr"; then
+    stack_rebase_bad="${stack_rebase_bad}missing stack rebase invariant: $stack_rebase_invariant"$'\n'
+  fi
+done
+if [ -n "$stack_rebase_bad" ]; then
+  note "FAIL: stacked PR rebases preserve parent bases"
+  note "$stack_rebase_bad"
+  fail=1
+else
+  note "ok: root and child PRs rebase onto their correct bases with patch-id and CI rechecks"
+fi
+
 if [ "${PSTACK_STATIC_ONLY:-0}" = "1" ]; then
   exit "$fail"
 fi
