@@ -93,7 +93,7 @@ describe("prepare setup", () => {
     const { value } = prepared();
     expect(value.preview[0]).toBe("feature implementation [1]: codex:gpt-5.6-terra@high (native)");
     expect(value.preview.some((line) => line.includes("arena cross-judge pool [1]"))).toBe(true);
-    expect(value.probes.map((probe) => `${probe.provider}:${probe.model}@${probe.effort}`)).not.toContain("claude:claude-fable-5@max");
+    expect(value.probes.map((probe) => `${probe.provider}:${probe.model}@${probe.effort}`)).toContain("claude:claude-fable-5-1@max");
     expect(value.targets[0].nextBytes).not.toEqual(value.targets[0].bytes);
   });
 

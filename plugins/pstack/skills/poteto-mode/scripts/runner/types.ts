@@ -4,7 +4,7 @@ export const EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"] as con
 export const ACCESS_MODES = ["read-only", "isolated-write"] as const;
 
 export const MODEL_EFFORTS = {
-  "claude:claude-fable-5": ["low", "medium", "high", "xhigh", "max"],
+  "claude:claude-fable-5-1": ["low", "medium", "high", "xhigh", "max"],
   "claude:claude-opus-5": ["low", "medium", "high", "xhigh", "max"],
   "codex:gpt-5.6-sol": ["low", "medium", "high", "xhigh", "max", "ultra"],
   "codex:gpt-5.6-terra": ["low", "medium", "high", "xhigh", "max", "ultra"],

@@ -45,6 +45,9 @@ describe("runner CLI parsing", () => {
     expect(() => parseArgs(argv(["--provider", "claude", "--model", "gpt-5.6-sol"]))).toThrow(
       "unsupported model or effort: claude:gpt-5.6-sol@max"
     );
+    expect(() => parseArgs(argv(["--provider", "claude", "--model", "claude-fable-5"]))).toThrow(
+      "unsupported model or effort: claude:claude-fable-5@max"
+    );
     expect(() => parseArgs(argv(["--provider", "claude", "--model", "claude-opus-5", "--effort", "ultra"]))).toThrow(
       "unsupported model or effort: claude:claude-opus-5@ultra"
     );

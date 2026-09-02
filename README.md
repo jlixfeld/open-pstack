@@ -80,7 +80,7 @@ In Codex, ask:
 Use pstack:setup-pstack to configure pstack.
 ```
 
-Setup checks the exact final role descriptors you can run, shows every parent-specific route, and asks before saving. The initial map separates feature implementation (GPT-5.6 Terra) from refactoring (GPT-5.6 Luna), uses Sol for bug/performance work, and Opus for judgment and prose.
+Setup checks the exact final role descriptors you can run, shows every parent-specific route, and asks before saving. The initial map separates feature implementation (GPT-5.6 Terra) from refactoring (GPT-5.6 Luna), uses Sol for bug/performance work, Fable 5.1 for the hardest tasks, and Opus for judgment and prose.
 
 ### 2. Use poteto-mode
 
@@ -151,7 +151,7 @@ This repository also keeps:
 
 ## Staying close to Lauren's pstack
 
-Open Pstack 1.2.0 tracks pstack 0.14.3 at Cursor commit [`bdf7aa355337897f167153e05069aca505dae17c`](https://github.com/cursor/plugins/commit/bdf7aa355337897f167153e05069aca505dae17c).
+Open Pstack 1.2.1 tracks pstack 0.14.3 at Cursor commit [`bdf7aa355337897f167153e05069aca505dae17c`](https://github.com/cursor/plugins/commit/bdf7aa355337897f167153e05069aca505dae17c).
 
 The two projects have separate version numbers. The pstack version identifies Lauren's upstream content. The Open Pstack version identifies the Claude Code and Codex package built from it.
 

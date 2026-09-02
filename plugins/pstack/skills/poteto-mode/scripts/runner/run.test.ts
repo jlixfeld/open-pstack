@@ -154,7 +154,7 @@ function options(provider: Provider, suffix: string = provider): RunnerOptions {
   const parent = provider === "codex" ? "claude" : "codex";
   const model =
     provider === "claude"
-      ? "claude-fable-5"
+      ? "claude-fable-5-1"
       : provider === "codex"
         ? "gpt-5.6-sol"
         : "grok-4.6";

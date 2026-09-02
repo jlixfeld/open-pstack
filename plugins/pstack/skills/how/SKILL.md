@@ -99,7 +99,7 @@ Run the full explain flow above (Steps 1-4). You must understand the architectur
 
 ### Step 2. Spawn Critics
 
-After the explanation is complete, start one architectural critic per descriptor in your configured how-critics list (defaults `codex:gpt-5.6-sol@max`, `claude:claude-opus-5@xhigh`) in one fan-out phase.
+After the explanation is complete, start one architectural critic per descriptor in your configured how-critics list (defaults `codex:gpt-5.6-sol@max`, `claude:claude-fable-5-1@xhigh`) in one fan-out phase.
 
 Route each critic descriptor in `read-only` mode. These are minimum reasoning levels. The lead may raise effort within the same current-frontier model when the architecture warrants it, but must not substitute providers silently.
 

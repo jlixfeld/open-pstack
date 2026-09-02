@@ -10,14 +10,14 @@ describe("parseProviderOutput", () => {
         session_id: "claude-session",
         usage: { input_tokens: 10, output_tokens: 3 },
         total_cost_usd: 0.05,
-        modelUsage: { "claude-fable-5": { inputTokens: 10 } },
+        modelUsage: { "claude-fable-5-1": { inputTokens: 10 } },
       }),
       "",
-      "claude-fable-5"
+      "claude-fable-5-1"
     );
     expect(parsed).toMatchObject({
       text: "CLAUDE_OK",
-      reportedModel: "claude-fable-5",
+      reportedModel: "claude-fable-5-1",
       sessionId: "claude-session",
       usage: { inputTokens: 10, outputTokens: 3 },
       costUsd: 0.05,
@@ -101,18 +101,18 @@ describe("parseProviderOutput", () => {
         result: "CLAUDE_OK",
         modelUsage: {
           "claude-haiku-4-5-20251001": {},
-          "claude-fable-5": {},
+          "claude-fable-5-1": {},
         },
       }),
       "",
-      "claude-fable-5"
+      "claude-fable-5-1"
     );
-    expect(parsed.reportedModel).toBe("claude-fable-5");
+    expect(parsed.reportedModel).toBe("claude-fable-5-1");
   });
 
   it("rejects malformed or textless responses", () => {
     expect(() =>
-      parseProviderOutput("claude", "not-json", "", "claude-fable-5")
+      parseProviderOutput("claude", "not-json", "", "claude-fable-5-1")
     ).toThrow("valid JSON");
     expect(() =>
       parseProviderOutput(
