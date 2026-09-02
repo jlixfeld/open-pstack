@@ -8,6 +8,10 @@ The routing manifest now lists Fable, Sol, Terra, Luna, Grok, and Opus with fami
 
 A read-only Cursor monitor compares the recorded Cursor commit with the current `cursor/plugins` default branch only under `pstack/`. The local command reports changed files and blob-backed overlap with fork-specific changes. A weekly, manually dispatchable workflow reconciles one tracking issue and never applies upstream changes. The documented backport process keeps Cursor changes separate from direct `port-upstream` updates.
 
+## 1.2.1 adds Claude Fable 5.1 routing
+
+Fable now uses the supported API identifier `claude-fable-5-1` across the provider matrix, runner validation, and Claude-native agents. The first-run map sends hardest tasks to Fable 5.1. How critics and Interrogate pair Sol with Fable 5.1, so each panel keeps one model per provider.
+
 ## 1.2.0 adds verified multi-PR plans, earlier runtime diagnostics, and shared review-bot triage
 
 Plans with several stages now use one checklist instead of an overview and separate files for each stage. It has one ordered section for every pull request and keeps all ten ways of testing the real product, unit tests, live and performance proof, checks for how changes work together, merge rules, and supporting details in one place. A Node-based checker with no extra dependencies rejects missing or out-of-order sections, fake screenshots, empty definitions of success, incomplete performance proof, incorrectly written review checks, unsupported punctuation, and incorrect command use. Claude Code and Codex use the same installed skill and checker through their existing parent-controlled setup. If a provider fails, it is identified by name and treated as a dropout. No backup provider or hidden time limit was added.

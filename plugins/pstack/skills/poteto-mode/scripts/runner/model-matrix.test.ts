@@ -22,6 +22,7 @@ const CODEX_TOOLS_PATH = join(
 );
 const SESSION_START_PATH = join(PLUGIN_ROOT, "hooks/session-start-context.md");
 const AGENTS_DIR = join(PLUGIN_ROOT, "agents");
+const ROUTING_DESIGN_PATH = join(PLUGIN_ROOT, "../../docs/tiered-routing-design.md");
 
 const MATRIX_HEADER = [
   "Family",
@@ -232,6 +233,7 @@ describe("model matrix", () => {
       ["grok", "xhigh"],
       ["opus", "xhigh"],
     ]);
+    expect(rows.find((row) => row.family === "fable")?.model).toBe("claude-fable-5-1");
     const documentedEfforts = rows.map((row) => [
       `${row.provider}:${row.model}`,
       row.selectableEfforts,
@@ -309,11 +311,11 @@ describe("model matrix", () => {
       expect(row.selectableEfforts).toContain(asEffort(effort));
     }
     const expectedPanels = new Map([
-      ["how critics", "codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
+      ["how critics", "codex:gpt-5.6-sol@max, claude:claude-fable-5-1@max"],
       ["arena runners", "codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
       ["arena cross-judge pool", "codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
       ["architect runners", "codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
-      ["interrogate reviewers", "codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
+      ["interrogate reviewers", "codex:gpt-5.6-sol@max, claude:claude-fable-5-1@max"],
     ]);
     for (const role of PANEL_ROLES) {
       const line = sheet
@@ -358,6 +360,10 @@ describe("model matrix", () => {
     expect(reference).toContain(
       "Arena and Architect use one Sol lane and one Opus lane, one model per active provider."
     );
+    const design = readFileSync(ROUTING_DESIGN_PATH, "utf8");
+    expect(design).toContain(`hardest tasks: ${consumer("hardest tasks")[0].slice(1, -1)}`);
+    expect(design).toContain(`how critics: ${consumer("how critics").map((lane) => lane.slice(1, -1)).join(", ")}`);
+    expect(design).toContain(`interrogate reviewers: ${consumer("interrogate reviewers").map((lane) => lane.slice(1, -1)).join(", ")}`);
   });
 
   it("keeps setup's fail-closed reconfiguration order", () => {

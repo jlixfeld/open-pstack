@@ -10,7 +10,7 @@ pstack model choices are provider-qualified descriptors:
 
 | Family | Upstream pstack choice | Provider | Model | Default effort | Selectable efforts | Claude-native agent stem |
 |---|---|---|---|---|---|---|
-| fable | claude-fable-5-thinking-max | claude | claude-fable-5 | max | low medium high xhigh max | fable |
+| fable | claude-fable-5-1-thinking-max | claude | claude-fable-5-1 | max | low medium high xhigh max | fable |
 | sol | gpt-5.6-sol-max | codex | gpt-5.6-sol | max | low medium high xhigh max ultra | - |
 | terra | gpt-5.6-terra-high | codex | gpt-5.6-terra | high | low medium high xhigh max ultra | - |
 | luna | gpt-5.6-luna-high | codex | gpt-5.6-luna | high | low medium high xhigh max | - |
@@ -35,19 +35,19 @@ one lane. A `panel` launches every stored lane in order, including repeats. A
 | perf-issue | single | codex:gpt-5.6-sol@max |
 | hillclimb | single | codex:gpt-5.6-sol@max |
 | judgment and prose | single | claude:claude-opus-5@xhigh |
-| hardest tasks | single | claude:claude-opus-5@xhigh |
+| hardest tasks | single | claude:claude-fable-5-1@max |
 | how explorer | single | codex:gpt-5.6-luna@medium |
 | how explainer | single | claude:claude-opus-5@xhigh |
-| how critics | panel | codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
+| how critics | panel | codex:gpt-5.6-sol@max, claude:claude-fable-5-1@max |
 | why investigators, synthesizer | panel | inherit-parent |
 | reflect tooling, judgment, divergent, synthesizer | panel | inherit-parent |
 | arena runners | panel | codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
 | arena cross-judge pool | pool | codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
 | swarm workers | single | codex:gpt-5.6-luna@high |
 | architect runners | panel | codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
-| interrogate reviewers | panel | codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
+| interrogate reviewers | panel | codex:gpt-5.6-sol@max, claude:claude-fable-5-1@max |
 
-Comparative first-run panels use one model per active provider. Sol represents OpenAI and Opus represents Anthropic. Add Grok once when xAI is active. Add another model from the same provider only as an explicit repeated lane. Specialized single roles still use Terra or Luna where their lower-cost profile fits the work.
+Comparative first-run panels use one model per active provider. Sol represents OpenAI. Fable represents Anthropic for How critics and Interrogate. Opus represents Anthropic for Arena and Architect. Add Grok once when xAI is active. Add another model from the same provider only as an explicit repeated lane. Specialized single roles still use Terra or Luna where their lower-cost profile fits the work.
 
 ## Authorization boundary
 

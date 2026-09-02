@@ -54,7 +54,7 @@ describe("invocationCommand", () => {
       options({
         parent: "codex",
         provider: "claude",
-        model: "claude-fable-5",
+        model: "claude-fable-5-1",
       })
     );
     expect(spec.command).toBe("claude");
@@ -62,7 +62,7 @@ describe("invocationCommand", () => {
     expect(spec.args).toEqual([
       "-p",
       "--model",
-      "claude-fable-5",
+      "claude-fable-5-1",
       "--effort",
       "max",
       "--permission-mode",
@@ -134,7 +134,7 @@ describe("invocationCommand", () => {
     expect(grok.args).not.toContain("--always-approve");
 
     const claude = invocationCommand(
-      options({ provider: "claude", model: "claude-fable-5", mode: "isolated-write" })
+      options({ provider: "claude", model: "claude-fable-5-1", mode: "isolated-write" })
     );
     expect(claude.args).toEqual(
       expect.arrayContaining([
@@ -150,7 +150,7 @@ describe("invocationCommand", () => {
     const cases = [
       {
         provider: "claude" as const,
-        model: "claude-fable-5",
+        model: "claude-fable-5-1",
         flag: (effort: "low" | "medium" | "high") => ["--effort", effort],
       },
       {

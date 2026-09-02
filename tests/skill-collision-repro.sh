@@ -135,7 +135,7 @@ Then stop. Do not invoke any skill or tool.
 EOF
 
 run() {
-  claude -p --plugin-dir "$scratch" --model claude-fable-5 --effort max --max-turns 3 "$1" < /dev/null 2>&1
+  claude -p --plugin-dir "$scratch" --model claude-fable-5-1 --effort max --max-turns 3 "$1" < /dev/null 2>&1
 }
 
 check() { # $1 label, $2 expected marker, $3 output
