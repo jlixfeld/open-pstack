@@ -193,6 +193,26 @@ else
   note "ok: root and child PRs rebase onto their correct bases with patch-id and CI rechecks"
 fi
 
+typescript_skill="$plugin/skills/typescript-best-practices/SKILL.md"
+typescript_patterns="$plugin/skills/typescript-best-practices/references/patterns.md"
+schema_bad=""
+if ! grep -Fq "At an external boundary, use the repository's runtime schema library and infer the TypeScript type from it. Do not add a dependency when no schema library exists." "$typescript_skill"; then
+  schema_bad="${schema_bad}TypeScript skill lost the existing-schema boundary rule"$'\n'
+fi
+if ! grep -Fq 'type User = z.infer<typeof UserSchema>;' "$typescript_patterns"; then
+  schema_bad="${schema_bad}TypeScript patterns lost schema-derived type inference"$'\n'
+fi
+if ! grep -Fq 'Do not add a schema dependency for one guard when the project has no runtime schema library.' "$typescript_patterns"; then
+  schema_bad="${schema_bad}TypeScript patterns lost the no-new-dependency guardrail"$'\n'
+fi
+if [ -n "$schema_bad" ]; then
+  note "FAIL: TypeScript schema-boundary guidance"
+  note "$schema_bad"
+  fail=1
+else
+  note "ok: TypeScript schema-boundary guidance preserves inference and no-new-dependency rule"
+fi
+
 if [ "${PSTACK_STATIC_ONLY:-0}" = "1" ]; then
   exit "$fail"
 fi
