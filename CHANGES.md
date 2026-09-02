@@ -10,7 +10,7 @@ A read-only Cursor monitor compares the recorded Cursor commit with the current 
 
 ## 1.2.1 adds Claude Fable 5.1 routing
 
-Fable now uses the supported API identifier `claude-fable-5-1` across the provider matrix, runner validation, and Claude-native agents. The first-run map sends hardest tasks to Fable 5.1. How critics and Interrogate pair Sol with Fable 5.1, so each panel keeps one model per provider.
+Fable now uses the supported API identifier `claude-fable-5-1` across the provider matrix, runner validation, and Claude-native agents. The first-run map sends hardest tasks to Fable 5.1 at `max`, the level reserved for work where correctness outweighs cost. How critics and Interrogate pair Sol with Fable 5.1 at `xhigh`, so each panel keeps one model per provider and both review roles retain the documented headroom to raise effort when the work warrants it.
 
 ## 1.2.0 adds verified multi-PR plans, earlier runtime diagnostics, and shared review-bot triage
 

@@ -38,14 +38,14 @@ one lane. A `panel` launches every stored lane in order, including repeats. A
 | hardest tasks | single | claude:claude-fable-5-1@max |
 | how explorer | single | codex:gpt-5.6-luna@medium |
 | how explainer | single | claude:claude-opus-5@xhigh |
-| how critics | panel | codex:gpt-5.6-sol@max, claude:claude-fable-5-1@max |
+| how critics | panel | codex:gpt-5.6-sol@max, claude:claude-fable-5-1@xhigh |
 | why investigators, synthesizer | panel | inherit-parent |
 | reflect tooling, judgment, divergent, synthesizer | panel | inherit-parent |
 | arena runners | panel | codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
 | arena cross-judge pool | pool | codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
 | swarm workers | single | codex:gpt-5.6-luna@high |
 | architect runners | panel | codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
-| interrogate reviewers | panel | codex:gpt-5.6-sol@max, claude:claude-fable-5-1@max |
+| interrogate reviewers | panel | codex:gpt-5.6-sol@max, claude:claude-fable-5-1@xhigh |
 
 Comparative first-run panels use one model per active provider. Sol represents OpenAI. Fable represents Anthropic for How critics and Interrogate. Opus represents Anthropic for Arena and Architect. Add Grok once when xAI is active. Add another model from the same provider only as an explicit repeated lane. Specialized single roles still use Terra or Luna where their lower-cost profile fits the work.
 

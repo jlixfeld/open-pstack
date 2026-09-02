@@ -41,7 +41,7 @@ describe("routing manifest", () => {
     for (const roleName of ["how critics", "arena runners", "architect runners", "interrogate reviewers"]) {
       const lanes = roles.find((role) => role.role === roleName)?.lanes ?? [];
       expect(lanes.map(renderLane)).toEqual(roleName === "how critics" || roleName === "interrogate reviewers"
-        ? ["codex:gpt-5.6-sol@max", "claude:claude-fable-5-1@max"]
+        ? ["codex:gpt-5.6-sol@max", "claude:claude-fable-5-1@xhigh"]
         : ["codex:gpt-5.6-sol@max", "claude:claude-opus-5@xhigh"]);
       expect(new Set(lanes.map((lane) => renderLane(lane).split(":", 1)[0])).size).toBe(lanes.length);
     }

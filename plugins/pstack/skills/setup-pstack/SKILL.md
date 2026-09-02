@@ -126,14 +126,14 @@ judgment and prose: claude:claude-opus-5@xhigh
 hardest tasks: claude:claude-fable-5-1@max
 how explorer: codex:gpt-5.6-luna@medium
 how explainer: claude:claude-opus-5@xhigh
-how critics: codex:gpt-5.6-sol@max, claude:claude-fable-5-1@max
+how critics: codex:gpt-5.6-sol@max, claude:claude-fable-5-1@xhigh
 why investigators, synthesizer: inherit-parent
 reflect tooling, judgment, divergent, synthesizer: inherit-parent
 arena runners: codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh
 arena cross-judge pool: codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh
 swarm workers: codex:gpt-5.6-luna@high
 architect runners: codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh
-interrogate reviewers: codex:gpt-5.6-sol@max, claude:claude-fable-5-1@max
+interrogate reviewers: codex:gpt-5.6-sol@max, claude:claude-fable-5-1@xhigh
 ```
 
 ### 8. Wire it in

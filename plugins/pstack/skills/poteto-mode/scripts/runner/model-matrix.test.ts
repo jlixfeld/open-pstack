@@ -311,11 +311,11 @@ describe("model matrix", () => {
       expect(row.selectableEfforts).toContain(asEffort(effort));
     }
     const expectedPanels = new Map([
-      ["how critics", "codex:gpt-5.6-sol@max, claude:claude-fable-5-1@max"],
+      ["how critics", "codex:gpt-5.6-sol@max, claude:claude-fable-5-1@xhigh"],
       ["arena runners", "codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
       ["arena cross-judge pool", "codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
       ["architect runners", "codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
-      ["interrogate reviewers", "codex:gpt-5.6-sol@max, claude:claude-fable-5-1@max"],
+      ["interrogate reviewers", "codex:gpt-5.6-sol@max, claude:claude-fable-5-1@xhigh"],
     ]);
     for (const role of PANEL_ROLES) {
       const line = sheet
