@@ -4,7 +4,7 @@ Code examples for each rule in `SKILL.md`. The underlying principles are languag
 
 ## Branded types
 
-Brand primitives so they can't be mixed up. Validate once at creation; downstream code trusts the type.
+Brand primitives so they can't be mixed up. Validate once at the boundary; downstream code trusts the type.
 
 ```ts
 type AgentId = string & { readonly __brand: "AgentId" };
@@ -126,6 +126,27 @@ function handle(input: unknown) {
 ```
 
 External sources include RPC payloads, `JSON.parse`, `postMessage`, IPC, file contents, environment variables, database results.
+
+## Schemas before hand-written guards
+
+At an external boundary, first look for the runtime schema library and existing schemas that the repository already uses. Let the schema validate the input and infer the TypeScript type from that schema. Do not keep a schema, a duplicate interface, and a guard that can drift apart.
+
+```ts
+import { z } from "zod";
+
+const UserSchema = z.object({
+  id: z.string().uuid(),
+  role: z.enum(["admin", "member"]),
+});
+
+type User = z.infer<typeof UserSchema>;
+
+function parseUser(input: unknown): User {
+  return UserSchema.parse(input);
+}
+```
+
+Use `safeParse` when invalid input is an expected branch. Use the equivalent inference helper when the repository uses another schema library. Do not add a schema dependency for one guard when the project has no runtime schema library.
 
 ## No `as` casts
 
