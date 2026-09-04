@@ -35,7 +35,7 @@ Start all N lanes in one fan-out phase through the provider-dispatch contract. N
 
 The rationale is mandatory. Without it, the parent cannot tell whether a candidate's structure is principled or accidental, which makes Phase E grafting unreliable. Each rationale names the alternatives the candidate considered and what it rejected.
 
-An external lane counts only when its receipt says `complete` and carries either a matching `provider-report` or Codex's exact `pinned-argv` evidence; a native lane counts when its tool transcript returns the assigned model's result. If a candidate fails, proceed with N-1 and note the exact dropout in the synthesis record. Never replace it with another provider silently.
+An external lane counts only when its receipt says `complete` and carries either a matching `provider-report` or Codex's exact `pinned-argv` evidence; a native lane counts when its tool transcript returns the assigned model's result. If a candidate fails, proceed with N-1 and note the exact dropout in the synthesis record. Exit 75 with a `provider-paused` receipt is not a dropout: preserve the lane and keep fan-out incomplete under the provider-dispatch pause contract. Never replace it with another provider silently.
 
 ## Phase C: Cross-judge
 

@@ -47,16 +47,19 @@ export interface UnverifiedManagedAttempt extends ManagedAttemptClaim {
   readonly reason: "prompt-unreadable" | "prompt-digest-mismatch" | "lane-fingerprint-mismatch";
 }
 
-export type ReceiptStatus =
-  | "complete"
-  | "provider-paused"
-  | "cancelled"
-  | "unavailable-cli"
-  | "unauthenticated"
-  | "unavailable-model"
-  | "timed-out"
-  | "child-failed"
-  | "malformed-output";
+export const RECEIPT_STATUSES = [
+  "complete",
+  "provider-paused",
+  "cancelled",
+  "unavailable-cli",
+  "unauthenticated",
+  "unavailable-model",
+  "timed-out",
+  "child-failed",
+  "malformed-output",
+] as const;
+
+export type ReceiptStatus = (typeof RECEIPT_STATUSES)[number];
 
 export type FailureReceiptStatus = Exclude<
   ReceiptStatus,

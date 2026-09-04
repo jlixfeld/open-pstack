@@ -214,16 +214,24 @@ else
 fi
 
 managed_lane_bad=""
-for required in 'provider-paused' 'Exit 75' 'canonical lane fingerprint' 'never sleeps or retries' 'never substitutes a model or provider'; do
+for required in 'provider-paused' 'Exit 75' 'whether managed or unmanaged' 'canonical lane fingerprint' 'never sleeps or retries' 'never substitutes a model or provider'; do
   if ! grep -Fq "$required" "$dispatch"; then
     managed_lane_bad="${managed_lane_bad}provider dispatch lost managed-lane invariant: $required"$'\n'
   fi
 done
 orchestrate="$plugin/skills/poteto-mode/playbooks/orchestrate.md"
-for required in 'orch lane register' 'orch --json lane tick' 'orch lane check --unit' 'orch --json lane retry' 'orch lane release' '30 minutes' 'Duplicate wakes and session restarts' 'There is no TTL or inferred timeout.'; do
+for required in 'orch lane register' 'orch --json lane tick' 'orch lane check --unit' 'orch --json lane retry' 'orch lane release' '30 minutes' 'never a shorter one' 'Duplicate wakes and session restarts' 'There is no TTL or inferred timeout.'; do
   if ! grep -Fq "$required" "$orchestrate"; then
     managed_lane_bad="${managed_lane_bad}orchestrate lost managed-lane invariant: $required"$'\n'
   fi
+done
+for consumer in arena swarm interrogate; do
+  consumer_skill="$plugin/skills/$consumer/SKILL.md"
+  for required in 'Exit 75' 'provider-paused' 'not a dropout'; do
+    if ! grep -Fq "$required" "$consumer_skill"; then
+      managed_lane_bad="${managed_lane_bad}$consumer lost pause handling: $required"$'\n'
+    fi
+  done
 done
 if [ -n "$managed_lane_bad" ]; then
   note "FAIL: managed provider lane contract"

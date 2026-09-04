@@ -39,18 +39,24 @@ describe("runner CLI parsing", () => {
     const digest = "a".repeat(64);
     expect(parseArgs(argv([
       "--lane-id", "manifest-review-claude",
-      "--attempt-id", "manifest-review-claude.000001",
+      "--attempt-id", "manifest-review-claude-000001",
       "--lane-fingerprint", digest,
       "--prompt-sha256", digest,
     ]))?.managedAttempt).toEqual({
       laneId: "manifest-review-claude",
-      attemptId: "manifest-review-claude.000001",
+      attemptId: "manifest-review-claude-000001",
       laneFingerprint: digest,
       promptSha256: digest,
     });
     expect(() => parseArgs(argv(["--lane-id", "manifest-review-claude"]))).toThrow(
       "must be provided together"
     );
+    expect(() => parseArgs(argv([
+      "--lane-id", "../escape",
+      "--attempt-id", "attempt",
+      "--lane-fingerprint", digest,
+      "--prompt-sha256", digest,
+    ]))).toThrow("lane-id must match");
   });
 
   it("normalizes every path before managed identity is checked", () => {
@@ -61,7 +67,7 @@ describe("runner CLI parsing", () => {
       "--output", "output.md",
       "--receipt", "receipt.json",
       "--lane-id", "lane",
-      "--attempt-id", "lane.000001",
+      "--attempt-id", "lane-000001",
       "--lane-fingerprint", digest,
       "--prompt-sha256", digest,
     ]));
@@ -72,7 +78,7 @@ describe("runner CLI parsing", () => {
       receiptPath: resolve("receipt.json"),
       managedAttempt: {
         laneId: "lane",
-        attemptId: "lane.000001",
+        attemptId: "lane-000001",
         laneFingerprint: digest,
         promptSha256: digest,
       },

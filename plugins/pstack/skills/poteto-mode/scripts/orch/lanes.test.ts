@@ -1,26 +1,64 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { parseArgs } from "../runner/cli.ts";
+import { invocationCommand, preflightCommand } from "../runner/commands.ts";
+import { buildReceipt } from "../runner/receipt.ts";
+import type {
+  FailureReceiptStatus,
+  RunnerOptions,
+  RunnerReceiptV2,
+} from "../runner/types.ts";
+import {
+  DEFAULT_RETRY_INTERVAL_SECONDS,
+  type LaunchPlan,
+  type RegisterParams,
+} from "./lanes.ts";
 import { openStore, type Store } from "./store.ts";
 
 const directories: string[] = [];
 const stores: Store[] = [];
+const START = Date.parse("2026-09-04T12:00:00.000Z");
 
-async function fixture(): Promise<{ readonly directory: string; readonly store: Store; readonly prompt: string }> {
+interface Fixture {
+  readonly directory: string;
+  readonly store: Store;
+  readonly prompt: string;
+  readonly setNow: (value: number) => void;
+}
+
+async function fixture(promptContents: string | Uint8Array = "mandatory review\n"): Promise<Fixture> {
   const directory = await mkdtemp(join(tmpdir(), "orch-lanes-"));
   directories.push(directory);
-  const store = openStore(directory);
+  let now = START;
+  const store = openStore(directory, { now: () => now });
   stores.push(store);
   await store.init();
   await store.units.add({ id: "unit", track: "test" });
   const prompt = join(directory, "source-prompt.md");
-  await writeFile(prompt, "mandatory claude review\n");
-  return { directory, store, prompt };
+  await writeFile(prompt, promptContents);
+  return {
+    directory,
+    store,
+    prompt,
+    setNow: (value) => {
+      now = value;
+    },
+  };
 }
 
-async function register(store: Store, prompt: string): Promise<void> {
-  await store.lanes.register({
+function registration(
+  promptPath: string,
+  changes: Partial<RegisterParams> = {}
+): RegisterParams {
+  return {
     laneId: "claude-review",
     unitId: "unit",
     parent: "codex",
@@ -28,102 +66,671 @@ async function register(store: Store, prompt: string): Promise<void> {
     model: "claude-opus-5",
     effort: "xhigh",
     mode: "read-only",
-    promptPath: prompt,
+    promptPath,
     cwd: "/tmp",
+    ...changes,
+  };
+}
+
+function runnerOptions(plan: LaunchPlan): RunnerOptions {
+  const result = parseArgs(plan.argv);
+  if (result === null) throw new Error("launch plan rendered runner help");
+  return result;
+}
+
+function processDetails(
+  input: RunnerOptions,
+  completedAt: number,
+  exitCode: number | null = 0
+) {
+  const executable = `/usr/local/bin/${input.provider}`;
+  const startedAt = completedAt - 1_250;
+  return {
+    startedAt: new Date(startedAt).toISOString(),
+    completedAt: new Date(completedAt).toISOString(),
+    elapsedMs: completedAt - startedAt,
+    executable,
+    preflight: {
+      argv: [executable, ...preflightCommand(input.provider).args],
+      status: "passed" as const,
+      evidence: "authenticated",
+    },
+    argv: [executable, ...invocationCommand(input).args],
+    exitCode,
+    signal: null,
+  };
+}
+
+function verifiedAttempt(input: RunnerOptions) {
+  if (input.managedAttempt === null) throw new Error("plan is not managed");
+  return { ...input.managedAttempt, verified: true as const };
+}
+
+function completeReceipt(
+  plan: LaunchPlan,
+  completedAt: number = START + 5_000
+): RunnerReceiptV2 {
+  const input = runnerOptions(plan);
+  const modelProof = input.provider === "codex"
+    ? {
+        provider: "codex" as const,
+        reportedModel: null,
+        modelVerified: false as const,
+        modelEvidence: "pinned-argv" as const,
+      }
+    : {
+        provider: input.provider,
+        reportedModel: `${input.model}-20260901`,
+        modelVerified: true as const,
+        modelEvidence: "provider-report" as const,
+      };
+  return buildReceipt(input, {
+    ...processDetails(input, completedAt),
+    status: "complete",
+    modelProof,
+    managedAttempt: verifiedAttempt(input),
+    sessionId: "session-1",
+    usage: { inputTokens: 10, outputTokens: 20 },
+    costUsd: 0.25,
   });
 }
 
-async function complete(plan: { readonly laneId: string; readonly attemptId: string; readonly argv: readonly string[]; readonly outputPath: string; readonly receiptPath: string }): Promise<void> {
-  const value = (name: string): string => {
-    const index = plan.argv.indexOf(name);
-    const result = plan.argv[index + 1];
-    if (index < 0 || result === undefined) throw new Error(`missing ${name}`);
-    return result;
-  };
+function pauseReceipt(
+  plan: LaunchPlan,
+  observedAt: number = START + 5_000
+): RunnerReceiptV2 {
+  const input = runnerOptions(plan);
+  if (input.provider !== "claude") throw new Error("only Claude pauses");
+  const message = "You've hit your session limit - resets later";
+  return buildReceipt(input, {
+    ...processDetails(input, observedAt, 1),
+    status: "provider-paused",
+    provider: "claude",
+    reportedModel: `${input.model}-20260901`,
+    managedAttempt: verifiedAttempt(input),
+    sessionId: "session-1",
+    usage: { inputTokens: 10 },
+    costUsd: 0.25,
+    providerPause: {
+      kind: "claude-session-limit",
+      terminalReason: "api_error",
+      apiStatus: 429,
+      observedAt: new Date(observedAt).toISOString(),
+      message,
+      resetEvidence: message,
+    },
+  });
+}
+
+function failureReceipt(
+  plan: LaunchPlan,
+  status: FailureReceiptStatus = "child-failed",
+  completedAt: number = START + 5_000
+): RunnerReceiptV2 {
+  const input = runnerOptions(plan);
+  return buildReceipt(input, {
+    ...processDetails(input, completedAt, 1),
+    status,
+    provider: input.provider,
+    managedAttempt: verifiedAttempt(input),
+    error: { message: "child exited with status 1", evidence: "boom" },
+  });
+}
+
+function identityFailureReceipt(plan: LaunchPlan): RunnerReceiptV2 {
+  const input = runnerOptions(plan);
+  if (input.managedAttempt === null) throw new Error("plan is not managed");
+  return buildReceipt(input, {
+    ...processDetails(input, START + 5_000, null),
+    executable: null,
+    preflight: {
+      argv: ["claude", ...preflightCommand("claude").args],
+      status: "not-run",
+      evidence: "",
+    },
+    argv: ["claude", ...invocationCommand(input).args],
+    status: "child-failed",
+    provider: input.provider,
+    managedAttempt: {
+      ...input.managedAttempt,
+      verified: false,
+      reason: "prompt-digest-mismatch",
+    },
+    error: {
+      message: "launcher failed after reserving output paths",
+      evidence: "managed attempt identity could not be verified",
+    },
+  });
+}
+
+async function writeJson(path: string, value: unknown): Promise<void> {
+  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function finishComplete(plan: LaunchPlan, completedAt?: number): Promise<void> {
   await writeFile(plan.outputPath, "review complete\n");
-  await writeFile(plan.receiptPath, JSON.stringify({
-    schemaVersion: 2,
-    status: "complete",
-    parent: value("--parent"), provider: value("--provider"), model: value("--model"), effort: value("--effort"), mode: value("--mode"),
-    cwd: value("--cwd"), promptPath: value("--prompt"), outputPath: plan.outputPath, receiptPath: plan.receiptPath,
-    timeoutMs: null, exitCode: 0, reportedModel: "claude-opus-5", modelVerified: true, modelEvidence: "provider-report",
-    managedAttempt: { verified: true, laneId: plan.laneId, attemptId: plan.attemptId, laneFingerprint: value("--lane-fingerprint"), promptSha256: value("--prompt-sha256") },
-  }));
+  await writeJson(plan.receiptPath, completeReceipt(plan, completedAt));
+}
+
+async function finishPause(plan: LaunchPlan, observedAt?: number): Promise<void> {
+  await writeJson(plan.receiptPath, pauseReceipt(plan, observedAt));
+}
+
+async function finishFailure(plan: LaunchPlan): Promise<void> {
+  await writeJson(plan.receiptPath, failureReceipt(plan));
+}
+
+async function registry(directory: string): Promise<any> {
+  return JSON.parse(
+    await readFile(join(directory, "provider-lanes", "registry.json"), "utf8")
+  );
 }
 
 afterEach(async () => {
   for (const store of stores.splice(0).reverse()) await store.close();
-  for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true });
+  for (const directory of directories.splice(0)) {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
-describe("managed provider lanes", () => {
-  it("registers before launch, replays a restart plan, and blocks unit state", async () => {
-    const { store, prompt } = await fixture();
-    await register(store, prompt);
-    await expect(store.units.set({ id: "unit", state: "done" })).rejects.toThrow("incomplete managed provider lanes");
-    const first = await store.lanes.tick();
-    const restarted = await store.lanes.tick();
-    expect(first).toHaveLength(1);
-    expect(restarted).toEqual(first);
-    expect(first[0]?.argv).toContain("--lane-fingerprint");
-  });
-
-  it("validates completion continuously and fails closed after output tampering", async () => {
-    const { store, prompt } = await fixture();
-    await register(store, prompt);
+describe("managed provider lane registration", () => {
+  it("snapshots exact bytes privately before returning the first launch plan", async () => {
+    const bytes = Uint8Array.from([0xff, 0x00, 0x61, 0x0a]);
+    const { directory, store, prompt } = await fixture(bytes);
+    const lane = await store.lanes.register(registration(prompt));
     const [plan] = await store.lanes.tick();
-    if (plan === undefined) throw new Error("missing launch plan");
-    await complete(plan);
-    await store.lanes.tick();
-    expect(await store.lanes.check("unit")).toBe(true);
-    await writeFile(plan.outputPath, "changed\n");
-    expect(await store.lanes.check("unit")).toBe(false);
+    if (plan === undefined) throw new Error("missing plan");
+
+    expect([...(await readFile(lane.spec.promptPath))]).toEqual([...bytes]);
+    expect((await stat(lane.spec.promptPath)).mode & 0o777).toBe(0o600);
+    expect(lane.spec.retryIntervalMs).toBe(
+      DEFAULT_RETRY_INTERVAL_SECONDS * 1_000
+    );
+    expect(plan.command).toBe(
+      resolve(import.meta.dir, "..", "runner", "pstack-runner")
+    );
+    expect(plan.argv).toEqual([
+      "--parent", lane.spec.parent,
+      "--provider", lane.spec.provider,
+      "--model", lane.spec.model,
+      "--effort", lane.spec.effort,
+      "--mode", lane.spec.mode,
+      "--prompt", lane.spec.promptPath,
+      "--cwd", lane.spec.cwd,
+      "--output", plan.outputPath,
+      "--receipt", plan.receiptPath,
+      "--lane-id", lane.spec.laneId,
+      "--attempt-id", plan.attemptId,
+      "--lane-fingerprint", lane.spec.laneFingerprint,
+      "--prompt-sha256", lane.spec.promptSha256,
+    ]);
+    expect((await registry(directory)).lanes).toHaveLength(1);
   });
 
-  it("refuses a stale release and retains a claimed reservation without a timeout", async () => {
-    const { store, prompt } = await fixture();
-    await register(store, prompt);
-    const [plan] = await store.lanes.tick();
-    if (plan === undefined) throw new Error("missing launch plan");
-    await writeFile(plan.outputPath, "");
-    await expect(store.lanes.release({ laneId: plan.laneId, attemptId: "old", reason: "dead pid 12" })).rejects.toThrow("does not have claimed attempt");
-    expect(await store.lanes.tick()).toEqual([]);
-    await store.lanes.release({ laneId: plan.laneId, attemptId: plan.attemptId, reason: "dead pid 12" });
-    const retry = await store.lanes.retry(plan.laneId);
-    expect(retry.attemptId).not.toBe(plan.attemptId);
-    expect(retry.outputPath).not.toBe(plan.outputPath);
-  });
+  it("makes identical registration idempotent and isolates the snapshot from source changes", async () => {
+    const { directory, store, prompt } = await fixture("original bytes\n");
+    const first = await store.lanes.register(registration(prompt));
+    const second = await store.lanes.register(registration(prompt));
+    expect(second).toEqual(first);
+    expect((await registry(directory)).lanes).toHaveLength(1);
 
-  it("records a Claude pause for the default 30-minute retry without launching early", async () => {
-    const { directory, store, prompt } = await fixture();
-    await register(store, prompt);
-    const [plan] = await store.lanes.tick();
-    if (plan === undefined) throw new Error("missing launch plan");
-    const value = (name: string): string => {
-      const index = plan.argv.indexOf(name);
-      const result = plan.argv[index + 1];
-      if (index < 0 || result === undefined) throw new Error(`missing ${name}`);
-      return result;
-    };
-    await writeFile(plan.receiptPath, JSON.stringify({
-      schemaVersion: 2, status: "provider-paused", parent: "codex", provider: "claude", model: "claude-opus-5", effort: "xhigh", mode: "read-only",
-      cwd: "/tmp", promptPath: value("--prompt"), outputPath: plan.outputPath, receiptPath: plan.receiptPath, timeoutMs: null,
-      managedAttempt: { verified: true, laneId: plan.laneId, attemptId: plan.attemptId, laneFingerprint: value("--lane-fingerprint"), promptSha256: value("--prompt-sha256") },
-      providerPause: { kind: "claude-session-limit" },
-    }));
-    expect(await store.lanes.tick()).toEqual([]);
-    const registry = JSON.parse(await readFile(join(directory, "provider-lanes", "registry.json"), "utf8"));
-    const attempt = registry.lanes[0].attempts.at(-1);
-    expect(attempt.kind).toBe("provider-paused");
-    expect(Date.parse(attempt.nextAttemptAt) - Date.parse(attempt.observedAt)).toBe(1_800_000);
-  });
-
-  it("snapshots prompts and rejects a changed registration policy", async () => {
-    const { directory, store, prompt } = await fixture();
-    await register(store, prompt);
     await writeFile(prompt, "changed source\n");
-    const snapshot = await readFile(join(directory, "provider-lanes", "claude-review", "prompt.md"), "utf8");
-    expect(snapshot).toBe("mandatory claude review\n");
-    await expect(store.lanes.register({ laneId: "claude-review", unitId: "unit", parent: "codex", provider: "claude", model: "claude-opus-5", effort: "high", mode: "read-only", promptPath: prompt, cwd: "/tmp" })).rejects.toThrow("different immutable specification");
+    expect(await readFile(first.spec.promptPath, "utf8")).toBe("original bytes\n");
+  });
+
+  it("rejects changed immutable specs and every runner-invalid managed route", async () => {
+    const { directory, store, prompt } = await fixture();
+    await store.lanes.register(registration(prompt));
+    await expect(
+      store.lanes.register(registration(prompt, { effort: "high" }))
+    ).rejects.toThrow("different immutable specification");
+
+    const invalidRoutes: Array<readonly [string, Partial<RegisterParams>]> = [
+      ["native route", { laneId: "native", parent: "claude" }],
+      ["managed Grok", {
+        laneId: "grok",
+        provider: "grok",
+        model: "grok-4.6",
+        effort: "xhigh",
+      }],
+      ["wrong provider model", { laneId: "wrong-model", model: "gpt-5.6-sol" }],
+      ["unsupported effort", { laneId: "wrong-effort", effort: "ultra" }],
+      ["missing cwd", { laneId: "missing-cwd", cwd: join(directory, "missing") }],
+      ["file cwd", { laneId: "file-cwd", cwd: prompt }],
+    ];
+    for (const [label, changes] of invalidRoutes) {
+      await expect(store.lanes.register(registration(prompt, changes))).rejects.toThrow();
+      expect((await registry(directory)).lanes.map((lane: any) => lane.spec.laneId)).not.toContain(label);
+    }
+  });
+
+  it("rejects unsafe bounded ids before deriving any path", async () => {
+    const { store, prompt } = await fixture();
+    for (const laneId of ["../../escape", "bad.name", "line\nbreak", "a".repeat(65), "-bad"]) {
+      await expect(
+        store.lanes.register(registration(prompt, { laneId }))
+      ).rejects.toThrow("must match");
+    }
+    await store.units.add({ id: "../unit", track: "test" });
+    await expect(
+      store.lanes.register(registration(prompt, { laneId: "safe", unitId: "../unit" }))
+    ).rejects.toThrow("must match");
+  });
+
+  it("records an explicit configured retry interval and timeout in the exact argv", async () => {
+    const { store, prompt } = await fixture();
+    const lane = await store.lanes.register(registration(prompt, {
+      intervalSeconds: 3_600,
+      timeoutSeconds: 5_400,
+    }));
+    const [plan] = await store.lanes.tick();
+    if (plan === undefined) throw new Error("missing plan");
+    expect(lane.spec.retryIntervalMs).toBe(3_600_000);
+    expect(lane.spec.timeoutMs).toBe(5_400_000);
+    expect(plan.argv.slice(-2)).toEqual(["--timeout", "5400"]);
+    await expect(store.lanes.register(registration(prompt, {
+      laneId: "too-soon",
+      intervalSeconds: DEFAULT_RETRY_INTERVAL_SECONDS - 1,
+    }))).rejects.toThrow("at least 1800");
+  });
+});
+
+describe("managed provider lane scheduling", () => {
+  it("replays the same unreserved plan after restart", async () => {
+    const { directory, store, prompt } = await fixture();
+    await store.lanes.register(registration(prompt));
+    const first = await store.lanes.tick();
+    await store.close();
+
+    const restarted = openStore(directory, { now: () => START });
+    stores.push(restarted);
+    expect(await restarted.lanes.tick()).toEqual(first);
+  });
+
+  it("does not relaunch when either artifact exists", async () => {
+    const { store, prompt } = await fixture();
+    await store.units.add({ id: "codex-unit", track: "test" });
+    await store.lanes.register(registration(prompt));
+    await store.lanes.register(registration(prompt, {
+      laneId: "codex-review",
+      unitId: "codex-unit",
+      parent: "claude",
+      provider: "codex",
+      model: "gpt-5.6-sol",
+      effort: "max",
+    }));
+    const plans = await store.lanes.tick();
+    expect(plans).toHaveLength(2);
+    await writeFile(plans[0]!.outputPath, "reserved");
+    await writeFile(plans[1]!.receiptPath, "{");
+    expect(await store.lanes.tick()).toEqual([]);
+  });
+
+  it("keeps provider-wide single-flight across duplicate wakes", async () => {
+    const { store, prompt } = await fixture();
+    await store.units.add({ id: "unit-two", track: "test" });
+    await store.lanes.register(registration(prompt, { laneId: "first" }));
+    await store.lanes.register(registration(prompt, {
+      laneId: "second",
+      unitId: "unit-two",
+    }));
+
+    const firstWake = await store.lanes.tick();
+    expect(firstWake).toHaveLength(1);
+    expect(firstWake[0]?.laneId).toBe("first");
+    expect(await store.lanes.tick()).toEqual(firstWake);
+  });
+
+  it("schedules from observedAt, does not retry early, and reuses the due probe plan", async () => {
+    const { directory, store, prompt, setNow } = await fixture();
+    await store.lanes.register(registration(prompt));
+    const [first] = await store.lanes.tick();
+    if (first === undefined) throw new Error("missing plan");
+    const observedAt = START + 5_000;
+    await finishPause(first, observedAt);
+    setNow(START + 20 * 60_000);
+    expect(await store.lanes.tick()).toEqual([]);
+
+    let paused = (await registry(directory)).lanes[0].attempts.at(-1);
+    expect(paused).toMatchObject({
+      kind: "provider-paused",
+      observedAt: new Date(observedAt).toISOString(),
+      nextAttemptAt: new Date(observedAt + 1_800_000).toISOString(),
+    });
+    setNow(observedAt + 1_800_000 - 1);
+    expect(await store.lanes.tick()).toEqual([]);
+    expect((await registry(directory)).lanes[0].attempts.at(-1)).toEqual(paused);
+
+    setNow(observedAt + 1_800_000);
+    const [due] = await store.lanes.tick();
+    if (due === undefined) throw new Error("missing due plan");
+    expect(due.laneId).toBe(first.laneId);
+    expect(due.attemptId).not.toBe(first.attemptId);
+    expect(due.outputPath).not.toBe(first.outputPath);
+    expect(due.receiptPath).not.toBe(first.receiptPath);
+    expect(await store.lanes.tick()).toEqual([due]);
+    paused = (await registry(directory)).lanes[0].attempts.at(-2);
+    expect(paused.nextAttemptAt).toBe(new Date(observedAt + 1_800_000).toISOString());
+  });
+
+  it("applies the configured interval from the receipt observation", async () => {
+    const { directory, store, prompt, setNow } = await fixture();
+    await store.lanes.register(registration(prompt, { intervalSeconds: 3_600 }));
+    const [plan] = await store.lanes.tick();
+    if (plan === undefined) throw new Error("missing plan");
+    const observedAt = START + 5_000;
+    await finishPause(plan, observedAt);
+    setNow(observedAt + 30_000);
+    await store.lanes.tick();
+    const paused = (await registry(directory)).lanes[0].attempts.at(-1);
+    expect(Date.parse(paused.nextAttemptAt) - Date.parse(paused.observedAt)).toBe(3_600_000);
+  });
+
+  it("blocks explicit retry while a sibling is claimed or provider-paused", async () => {
+    const { store, prompt, setNow } = await fixture();
+    await store.lanes.register(registration(prompt, { laneId: "failed" }));
+    const [failed] = await store.lanes.tick();
+    if (failed === undefined) throw new Error("missing plan");
+    await finishFailure(failed);
+    setNow(START + 5_000);
+    await store.lanes.tick();
+
+    await store.units.add({ id: "unit-two", track: "test" });
+    await store.lanes.register(registration(prompt, {
+      laneId: "probe",
+      unitId: "unit-two",
+    }));
+    const [probe] = await store.lanes.tick();
+    if (probe === undefined) throw new Error("missing probe");
+    await expect(store.lanes.retry("failed")).rejects.toThrow(
+      "provider claude is occupied by lane probe"
+    );
+
+    await finishPause(probe, START + 10_000);
+    setNow(START + 10_000);
+    await store.lanes.tick();
+    await expect(store.lanes.retry("failed")).rejects.toThrow(
+      "provider claude is occupied by lane probe"
+    );
+    setNow(START + 10_000 + 1_800_000);
+    expect((await store.lanes.tick())[0]?.laneId).toBe("probe");
+  });
+});
+
+describe("managed provider lane outcomes and gates", () => {
+  it("runs pause to due retry to continuously validated completion", async () => {
+    const { store, prompt, setNow } = await fixture();
+    await store.lanes.register(registration(prompt));
+    const [first] = await store.lanes.tick();
+    if (first === undefined) throw new Error("missing plan");
+    await finishPause(first);
+    setNow(START + 5_000);
+    await store.lanes.tick();
+    expect((await store.lanes.check("unit")).blockingLaneIds).toEqual([
+      "claude-review",
+    ]);
+
+    setNow(START + 5_000 + 1_800_000);
+    const [retry] = await store.lanes.tick();
+    if (retry === undefined) throw new Error("missing retry");
+    await finishComplete(retry, START + 5_000 + 1_800_000 + 2_000);
+    await store.lanes.tick();
+    expect(await store.lanes.check("unit")).toEqual({
+      unitId: "unit",
+      ready: true,
+      blockingLaneIds: [],
+    });
+  });
+
+  it("requires explicit retry for ordinary failure and uses fresh artifacts", async () => {
+    const { store, prompt, setNow } = await fixture();
+    await store.lanes.register(registration(prompt));
+    const [first] = await store.lanes.tick();
+    if (first === undefined) throw new Error("missing plan");
+    await finishFailure(first);
+    setNow(START + 5_000);
+    expect(await store.lanes.tick()).toEqual([]);
+
+    const retry = await store.lanes.retry(first.laneId);
+    expect(retry.attemptId).not.toBe(first.attemptId);
+    expect(retry.outputPath).not.toBe(first.outputPath);
+    expect(retry.receiptPath).not.toBe(first.receiptPath);
+  });
+
+  it("holds an identity-failure receipt until authoritative release", async () => {
+    const { directory, store, prompt } = await fixture();
+    await store.lanes.register(registration(prompt));
+    const [plan] = await store.lanes.tick();
+    if (plan === undefined) throw new Error("missing plan");
+    await writeJson(plan.receiptPath, identityFailureReceipt(plan));
+    expect(await store.lanes.tick()).toEqual([]);
+    expect((await registry(directory)).lanes[0].attempts.at(-1).kind).toBe("claimed");
+    expect((await store.lanes.check("unit")).ready).toBe(false);
+
+    await store.lanes.release({
+      laneId: plan.laneId,
+      attemptId: plan.attemptId,
+      reason: "retained pid 12 is dead",
+    });
+    expect((await store.lanes.retry(plan.laneId)).attemptId).not.toBe(plan.attemptId);
+  });
+
+  it("never infers a dead claim and refuses stale release", async () => {
+    const { store, prompt, setNow } = await fixture();
+    await store.lanes.register(registration(prompt));
+    const [plan] = await store.lanes.tick();
+    if (plan === undefined) throw new Error("missing plan");
+    await writeFile(plan.outputPath, "");
+    setNow(Date.parse("2036-09-04T12:00:00.000Z"));
+    expect(await store.lanes.tick()).toEqual([]);
+    await expect(store.lanes.release({
+      laneId: plan.laneId,
+      attemptId: "stale-attempt",
+      reason: "dead pid 12",
+    })).rejects.toThrow("does not have claimed attempt");
+    await store.lanes.release({
+      laneId: plan.laneId,
+      attemptId: plan.attemptId,
+      reason: "dead pid 12",
+    });
+  });
+
+  it("reconciles first and refuses release after complete or pause", async () => {
+    for (const terminal of ["complete", "pause"] as const) {
+      const { store, prompt, setNow } = await fixture();
+      await store.lanes.register(registration(prompt));
+      const [plan] = await store.lanes.tick();
+      if (plan === undefined) throw new Error("missing plan");
+      if (terminal === "complete") await finishComplete(plan);
+      else await finishPause(plan);
+      setNow(START + 5_000);
+      await expect(store.lanes.release({
+        laneId: plan.laneId,
+        attemptId: plan.attemptId,
+        reason: "dead pid 12",
+      })).rejects.toThrow("does not have claimed attempt");
+    }
+  });
+
+  it("blocks advancing states but permits metadata and terminal reconciliation", async () => {
+    const { store, prompt } = await fixture();
+    await store.lanes.register(registration(prompt));
+    await expect(store.units.set({ id: "unit", state: "done" })).rejects.toThrow(
+      "incomplete managed provider lanes"
+    );
+    expect(await store.units.set({
+      id: "unit",
+      state: "pending",
+      branch: "feature/review",
+    })).toMatchObject({ state: "pending", branch: "feature/review" });
+    expect(await store.units.set({ id: "unit", state: "abandoned" })).toMatchObject({
+      state: "abandoned",
+    });
+    expect(await store.units.set({ id: "unit", state: "zombie-reconciled" })).toMatchObject({
+      state: "zombie-reconciled",
+    });
+    await expect(store.units.set({ id: "unit", state: "done" })).rejects.toThrow(
+      "incomplete managed provider lanes"
+    );
+  });
+
+  it("rejects unknown unit checks", async () => {
+    const { store } = await fixture();
+    await expect(store.lanes.check("typo-unit")).rejects.toThrow("not found");
+  });
+
+  it("revalidates prompt, receipt, and output bytes after completion", async () => {
+    const { store, prompt, setNow } = await fixture();
+    const lane = await store.lanes.register(registration(prompt));
+    const [plan] = await store.lanes.tick();
+    if (plan === undefined) throw new Error("missing plan");
+    await finishComplete(plan);
+    setNow(START + 5_000);
+    await store.lanes.tick();
+    expect((await store.lanes.check("unit")).ready).toBe(true);
+
+    const originalPrompt = await readFile(lane.spec.promptPath);
+    const originalReceipt = await readFile(plan.receiptPath);
+    const originalOutput = await readFile(plan.outputPath);
+    for (const [path, changed, original] of [
+      [lane.spec.promptPath, "changed prompt", originalPrompt],
+      [plan.receiptPath, `${originalReceipt.toString()} `, originalReceipt],
+      [plan.outputPath, "changed output", originalOutput],
+    ] as const) {
+      await writeFile(path, changed);
+      expect((await store.lanes.check("unit")).ready).toBe(false);
+      await writeFile(path, original);
+      expect((await store.lanes.check("unit")).ready).toBe(true);
+    }
+  });
+
+  it("accepts Claude build-qualified proof and Codex pinned-argv proof", async () => {
+    const { store, prompt, setNow } = await fixture();
+    await store.units.add({ id: "codex-unit", track: "test" });
+    await store.lanes.register(registration(prompt));
+    await store.lanes.register(registration(prompt, {
+      laneId: "codex-review",
+      unitId: "codex-unit",
+      parent: "claude",
+      provider: "codex",
+      model: "gpt-5.6-sol",
+      effort: "max",
+    }));
+    const plans = await store.lanes.tick();
+    for (const plan of plans) await finishComplete(plan);
+    setNow(START + 5_000);
+    await store.lanes.tick();
+    expect((await store.lanes.check("unit")).ready).toBe(true);
+    expect((await store.lanes.check("codex-unit")).ready).toBe(true);
+  });
+});
+
+describe("managed receipt rejection", () => {
+  it("holds every partial, legacy, unmanaged, mismatched, or impossible receipt", async () => {
+    const cases: Array<readonly [string, (valid: any) => unknown]> = [
+      ["partial", () => ({ schemaVersion: 2, status: "complete" })],
+      ["v1", (valid) => ({ ...valid, schemaVersion: 1 })],
+      ["unmanaged", (valid) => ({ ...valid, managedAttempt: null })],
+      ["unknown status", (valid) => ({ ...valid, status: "future" })],
+      ["wrong parent", (valid) => ({ ...valid, parent: "claude" })],
+      ["wrong cwd", (valid) => ({ ...valid, cwd: "/" })],
+      ["wrong prompt path", (valid) => ({ ...valid, promptPath: "/tmp/other" })],
+      ["wrong output path", (valid) => ({ ...valid, outputPath: "/tmp/other" })],
+      ["wrong receipt path", (valid) => ({ ...valid, receiptPath: "/tmp/other" })],
+      ["wrong timeout", (valid) => ({ ...valid, timeoutMs: 1_000 })],
+      ["wrong lane", (valid) => ({
+        ...valid,
+        managedAttempt: { ...valid.managedAttempt, laneId: "other" },
+      })],
+      ["wrong attempt", (valid) => ({
+        ...valid,
+        managedAttempt: { ...valid.managedAttempt, attemptId: "other" },
+      })],
+      ["wrong fingerprint", (valid) => ({
+        ...valid,
+        managedAttempt: { ...valid.managedAttempt, laneFingerprint: "b".repeat(64) },
+      })],
+      ["wrong digest", (valid) => ({
+        ...valid,
+        managedAttempt: { ...valid.managedAttempt, promptSha256: "b".repeat(64) },
+      })],
+      ["wrong argv", (valid) => ({ ...valid, argv: ["claude", "--wrong"] })],
+      ["invalid preflight", (valid) => ({
+        ...valid,
+        preflight: { ...valid.preflight, status: "not-run" },
+      })],
+      ["invalid timing", (valid) => ({ ...valid, elapsedMs: valid.elapsedMs + 1 })],
+      ["timing before claim", (valid) => ({
+        ...valid,
+        startedAt: "2020-01-01T00:00:00.000Z",
+        completedAt: "2020-01-01T00:00:01.250Z",
+      })],
+      ["invalid error", (valid) => ({ ...valid, error: {} })],
+      ["invalid pause field", (valid) => ({ ...valid, providerPause: {} })],
+      ["invalid model proof", (valid) => ({ ...valid, reportedModel: "claude-opus-4" })],
+      ["extra field", (valid) => ({ ...valid, forged: true })],
+    ];
+
+    for (const [label, mutate] of cases) {
+      const { directory, store, prompt } = await fixture();
+      await store.lanes.register(registration(prompt));
+      const [plan] = await store.lanes.tick();
+      if (plan === undefined) throw new Error(`missing plan for ${label}`);
+      await writeFile(plan.outputPath, "candidate output\n");
+      await writeJson(plan.receiptPath, mutate(completeReceipt(plan)));
+      expect(await store.lanes.tick()).toEqual([]);
+      expect((await registry(directory)).lanes[0].attempts.at(-1).kind).toBe("claimed");
+      expect((await store.lanes.check("unit")).blockingLaneIds).toEqual([
+        "claude-review",
+      ]);
+    }
+  });
+
+  it("holds malformed JSON and valid completion with missing or empty output", async () => {
+    for (const output of [null, ""] as const) {
+      const { directory, store, prompt } = await fixture();
+      await store.lanes.register(registration(prompt));
+      const [plan] = await store.lanes.tick();
+      if (plan === undefined) throw new Error("missing plan");
+      if (output !== null) await writeFile(plan.outputPath, output);
+      await writeJson(plan.receiptPath, completeReceipt(plan));
+      expect(await store.lanes.tick()).toEqual([]);
+      expect((await registry(directory)).lanes[0].attempts.at(-1).kind).toBe("claimed");
+    }
+
+    const { directory, store, prompt } = await fixture();
+    await store.lanes.register(registration(prompt));
+    const [plan] = await store.lanes.tick();
+    if (plan === undefined) throw new Error("missing plan");
+    await writeFile(plan.receiptPath, "{");
+    expect(await store.lanes.tick()).toEqual([]);
+    expect((await registry(directory)).lanes[0].attempts.at(-1).kind).toBe("claimed");
+  });
+
+  it("holds forged pause metadata and malformed failure receipts", async () => {
+    for (const kind of ["pause", "failure"] as const) {
+      const { directory, store, prompt } = await fixture();
+      await store.lanes.register(registration(prompt));
+      const [plan] = await store.lanes.tick();
+      if (plan === undefined) throw new Error("missing plan");
+      const receipt = kind === "pause" ? pauseReceipt(plan) : failureReceipt(plan);
+      const invalid = kind === "pause"
+        ? { ...receipt, providerPause: { kind: "claude-session-limit" } }
+        : { ...receipt, error: null };
+      await writeJson(plan.receiptPath, invalid);
+      expect(await store.lanes.tick()).toEqual([]);
+      expect((await registry(directory)).lanes[0].attempts.at(-1).kind).toBe("claimed");
+    }
+
+    for (const receiptFor of [pauseReceipt, failureReceipt] as const) {
+      const { directory, store, prompt } = await fixture();
+      await store.lanes.register(registration(prompt));
+      const [plan] = await store.lanes.tick();
+      if (plan === undefined) throw new Error("missing plan");
+      await writeFile(plan.outputPath, "unexpected output reservation");
+      await writeJson(plan.receiptPath, receiptFor(plan));
+      expect(await store.lanes.tick()).toEqual([]);
+      expect((await registry(directory)).lanes[0].attempts.at(-1).kind).toBe("claimed");
+    }
   });
 });

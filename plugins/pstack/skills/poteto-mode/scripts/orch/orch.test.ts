@@ -11,6 +11,7 @@ import {
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parseArgs as parseRunnerArgs } from "../runner/cli.ts";
 import {
   NotFoundError,
   UserError,
@@ -575,6 +576,105 @@ describe("orch CLI", () => {
       sha: "",
       brief: "",
     });
+  });
+
+  it("drives every lane command and reports blocking ids in plain and JSON modes", async () => {
+    const directory = await makeDirectory();
+    const prompt = join(directory, "prompt.md");
+    await writeFile(prompt, "review this\n");
+    expect(runCli(["--store", directory, "init"]).code).toBe(0);
+    expect(runCli([
+      "--store", directory,
+      "unit", "add", "unit",
+      "--track", "test",
+    ]).code).toBe(0);
+
+    const registered = runCli([
+      "--store", directory,
+      "lane", "register", "review",
+      "--unit", "unit",
+      "--parent", "codex",
+      "--provider", "claude",
+      "--model", "claude-opus-5",
+      "--effort", "xhigh",
+      "--mode", "read-only",
+      "--prompt", prompt,
+      "--cwd", "/tmp",
+    ]);
+    expect(registered).toMatchObject({ code: 0, stdout: "review\tregistered\n", stderr: "" });
+
+    const ticked = runCli(["--store", directory, "--json", "lane", "tick"]);
+    expect(ticked.code).toBe(0);
+    const plans = JSON.parse(ticked.stdout).plans;
+    expect(plans).toHaveLength(1);
+    const plan = plans[0];
+    expect(plan.command).toBe(join(import.meta.dir, "..", "runner", "pstack-runner"));
+    expect(parseRunnerArgs(plan.argv)).toMatchObject({
+      parent: "codex",
+      provider: "claude",
+      model: "claude-opus-5",
+      effort: "xhigh",
+      mode: "read-only",
+      promptPath: join(directory, "provider-lanes", "review", "prompt.md"),
+      cwd: "/tmp",
+      outputPath: plan.outputPath,
+      receiptPath: plan.receiptPath,
+      managedAttempt: {
+        laneId: "review",
+        attemptId: plan.attemptId,
+      },
+    });
+
+    const blocked = runCli([
+      "--store", directory,
+      "lane", "check",
+      "--unit", "unit",
+    ]);
+    expect(blocked).toEqual({
+      code: 3,
+      stdout: "",
+      stderr: "BLOCKED\treview\n",
+    });
+    const blockedJson = runCli([
+      "--store", directory,
+      "--json",
+      "lane", "check",
+      "--unit", "unit",
+    ]);
+    expect(blockedJson.code).toBe(3);
+    expect(blockedJson.stderr).toBe("");
+    expect(JSON.parse(blockedJson.stdout)).toEqual({
+      unitId: "unit",
+      ready: false,
+      blockingLaneIds: ["review"],
+    });
+
+    const released = runCli([
+      "--store", directory,
+      "lane", "release", "review",
+      "--attempt", plan.attemptId,
+      "--reason", "retained pid 12 is dead",
+    ]);
+    expect(released).toMatchObject({ code: 0, stdout: "review\tinterrupted\n", stderr: "" });
+
+    const retried = runCli([
+      "--store", directory,
+      "--json",
+      "lane", "retry", "review",
+    ]);
+    expect(retried.code).toBe(0);
+    const retryPlan = JSON.parse(retried.stdout);
+    expect(retryPlan.laneId).toBe("review");
+    expect(retryPlan.attemptId).not.toBe(plan.attemptId);
+    expect(retryPlan.outputPath).not.toBe(plan.outputPath);
+
+    const unknown = runCli([
+      "--store", directory,
+      "lane", "check",
+      "--unit", "missing",
+    ]);
+    expect(unknown.code).toBe(2);
+    expect(unknown.stderr).toContain("unit missing not found");
   });
 
   it("maps user and not-found outcomes to the preserved exit codes", async () => {

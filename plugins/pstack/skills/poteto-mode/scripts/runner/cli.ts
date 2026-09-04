@@ -3,7 +3,6 @@ import { resolvedOptions, runLane } from "./run.ts";
 import {
   ACCESS_MODES,
   EFFORTS,
-  MODEL_EFFORTS,
   PARENTS,
   PROVIDERS,
   type AccessMode,
@@ -13,6 +12,11 @@ import {
   type RunnerOptions,
   UsageError,
 } from "./types.ts";
+import {
+  validateRunnerRoute,
+  validateSafeId,
+  validateSha256,
+} from "./validation.ts";
 
 const HELP = `Usage: pstack-runner --parent <claude|codex> --provider <claude|codex|grok> \\
   --model <slug> --effort <level> --mode <read-only|isolated-write> \\
@@ -63,7 +67,7 @@ function sha256(name: string, value: string): string {
   if (!/^[a-f0-9]{64}$/i.test(value)) {
     throw new UsageError(`${name} must be a SHA-256 hex digest`);
   }
-  return value.toLowerCase();
+  return validateSha256(value.toLowerCase(), name);
 }
 
 function managedAttempt(values: {
@@ -86,8 +90,8 @@ function managedAttempt(values: {
     );
   }
   return {
-    laneId: required("lane-id", entries[0][1]),
-    attemptId: required("attempt-id", entries[1][1]),
+    laneId: validateSafeId(required("lane-id", entries[0][1]), "lane-id"),
+    attemptId: validateSafeId(required("attempt-id", entries[1][1]), "attempt-id"),
     laneFingerprint: sha256("lane-fingerprint", required("lane-fingerprint", entries[2][1])),
     promptSha256: sha256("prompt-sha256", required("prompt-sha256", entries[3][1])),
   };
@@ -138,12 +142,22 @@ export function parseArgs(argv: readonly string[]): RunnerOptions | null {
   const provider = oneOf("provider", stringValue(parsed.values.provider), PROVIDERS) as Provider;
   const model = required("model", stringValue(parsed.values.model));
   const effort = oneOf("effort", stringValue(parsed.values.effort), EFFORTS) as Effort;
-  const selectable = MODEL_EFFORTS[`${provider}:${model}` as keyof typeof MODEL_EFFORTS];
-  if (selectable === undefined || !(selectable as readonly Effort[]).includes(effort)) {
-    throw new UsageError(`unsupported model or effort: ${provider}:${model}@${effort}`);
-  }
+  const parent = oneOf("parent", stringValue(parsed.values.parent), PARENTS) as Parent;
+  const attempt = managedAttempt({
+    laneId: parsed.values["lane-id"],
+    attemptId: parsed.values["attempt-id"],
+    laneFingerprint: parsed.values["lane-fingerprint"],
+    promptSha256: parsed.values["prompt-sha256"],
+  });
+  validateRunnerRoute({
+    parent,
+    provider,
+    model,
+    effort,
+    managed: attempt !== null,
+  });
   return resolvedOptions({
-    parent: oneOf("parent", stringValue(parsed.values.parent), PARENTS) as Parent,
+    parent,
     provider,
     model,
     effort,
@@ -153,12 +167,7 @@ export function parseArgs(argv: readonly string[]): RunnerOptions | null {
     outputPath: required("output", stringValue(parsed.values.output)),
     receiptPath: required("receipt", stringValue(parsed.values.receipt)),
     timeoutMs: timeoutSeconds === null ? null : timeoutSeconds * 1_000,
-    managedAttempt: managedAttempt({
-      laneId: parsed.values["lane-id"],
-      attemptId: parsed.values["attempt-id"],
-      laneFingerprint: parsed.values["lane-fingerprint"],
-      promptSha256: parsed.values["prompt-sha256"],
-    }),
+    managedAttempt: attempt,
   });
 }
 

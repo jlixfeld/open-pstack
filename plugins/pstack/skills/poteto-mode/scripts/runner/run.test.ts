@@ -15,15 +15,17 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { invocationCommand, preflightCommand } from "./commands.ts";
 import { laneFingerprint, sha256Hex } from "./identity.ts";
+import { parseRunnerReceipt } from "./receipt.ts";
 import { childEnvironment, runLane } from "./run.ts";
 import { main } from "./cli.ts";
-import type { Provider, RunnerOptions, RunnerReceipt } from "./types.ts";
+import type { Provider, RunnerOptions, RunnerReceiptV2 } from "./types.ts";
 
 let scratch = "";
 let bin = "";
 let previousPath: string | undefined;
 
 const fake = `#!/usr/bin/env bun
+import { Buffer } from "node:buffer";
 import { appendFileSync, existsSync, unlinkSync, writeFileSync } from "node:fs";
 const args = process.argv.slice(2);
 const name = process.argv[1].split("/").at(-1);
@@ -113,8 +115,12 @@ if (name === "grok" && args[0] === "models") {
 const modelIndex = args.findIndex((value) => value === "--model");
 const model = modelIndex >= 0 ? args[modelIndex + 1] : "unknown";
 if (stage === "model" && process.env.FAKE_INVOCATION_LOG_PATH) {
-  const prompt = name === "grok" ? "" : await new Response(Bun.stdin.stream()).text();
-  writeFileSync(process.env.FAKE_INVOCATION_LOG_PATH, JSON.stringify({args, cwd: process.cwd(), prompt}));
+  const promptBytes = name === "grok"
+    ? new Uint8Array()
+    : new Uint8Array(await new Response(Bun.stdin.stream()).arrayBuffer());
+  const prompt = new TextDecoder().decode(promptBytes);
+  const promptBase64 = Buffer.from(promptBytes).toString("base64");
+  writeFileSync(process.env.FAKE_INVOCATION_LOG_PATH, JSON.stringify({args, cwd: process.cwd(), prompt, promptBase64}));
 }
 if (process.env.FAKE_INVALID_MODEL === "1") {
   console.error("The requested model is not supported with this account.");
@@ -198,8 +204,10 @@ function options(provider: Provider, suffix: string = provider): RunnerOptions {
   };
 }
 
-function receipt(path: string): RunnerReceipt {
-  return JSON.parse(readFileSync(path, "utf8")) as RunnerReceipt;
+function receipt(path: string): RunnerReceiptV2 {
+  const parsed = parseRunnerReceipt(JSON.parse(readFileSync(path, "utf8")));
+  if (parsed === null) throw new Error(`runner wrote an invalid receipt: ${path}`);
+  return parsed;
 }
 
 function managedOptions(
@@ -207,12 +215,12 @@ function managedOptions(
   timeoutMs: number | null = null
 ): RunnerOptions {
   const input = { ...options("claude", suffix), timeoutMs };
-  const promptSha256 = sha256Hex(readFileSync(input.promptPath, "utf8"));
+  const promptSha256 = sha256Hex(readFileSync(input.promptPath));
   return {
     ...input,
     managedAttempt: {
       laneId: "manifest-review-claude",
-      attemptId: "manifest-review-claude.000001",
+      attemptId: "manifest-review-claude-000001",
       laneFingerprint: laneFingerprint(input, promptSha256),
       promptSha256,
     },
@@ -220,12 +228,12 @@ function managedOptions(
 }
 
 function withManagedAttempt(input: RunnerOptions): RunnerOptions {
-  const promptSha256 = sha256Hex(readFileSync(input.promptPath, "utf8"));
+  const promptSha256 = sha256Hex(readFileSync(input.promptPath));
   return {
     ...input,
     managedAttempt: {
       laneId: `managed-${input.provider}`,
-      attemptId: `managed-${input.provider}.000001`,
+      attemptId: `managed-${input.provider}-000001`,
       laneFingerprint: laneFingerprint(input, promptSha256),
       promptSha256,
     },
@@ -243,6 +251,7 @@ function expectManagedInvocation(input: RunnerOptions, invocationLog: string): v
     args: [...invocation.args],
     cwd: realpathSync(input.cwd),
     prompt: readFileSync(input.promptPath, "utf8"),
+    promptBase64: readFileSync(input.promptPath).toString("base64"),
   });
   const recorded = receipt(input.receiptPath);
   if (recorded.schemaVersion !== 2) {
@@ -391,6 +400,21 @@ afterEach(() => {
 });
 
 describe("runLane", () => {
+  it("classifies the structured Claude session limit for an unmanaged lane", async () => {
+    process.env.FAKE_CLAUDE_PAUSE_EXIT = "1";
+    const input = options("claude", "unmanaged-pause");
+
+    const result = await runLane(input);
+
+    expect(result.exitCode).toBe(75);
+    expect(receipt(input.receiptPath)).toMatchObject({
+      schemaVersion: 2,
+      status: "provider-paused",
+      managedAttempt: null,
+      providerPause: { kind: "claude-session-limit" },
+    });
+  });
+
   for (const exit of [1, 0]) {
     it(`records Claude's structured session limit when the child exits ${exit}`, async () => {
       process.env.FAKE_CLAUDE_PAUSE_EXIT = String(exit);
@@ -664,6 +688,20 @@ describe("runLane", () => {
       providerPause: null,
       error: null,
     });
+  });
+
+  it("hashes and sends the exact managed prompt bytes", async () => {
+    const bytes = Uint8Array.from([0xff, 0x00, 0x61, 0x0a]);
+    writeFileSync(join(scratch, "prompt.md"), bytes);
+    const input = managedOptions("managed-bytes");
+    const invocationLog = join(scratch, "managed-bytes.invocation.json");
+    process.env.FAKE_INVOCATION_LOG_PATH = invocationLog;
+
+    const result = await runLane(input);
+
+    expect(result.exitCode).toBe(0);
+    expectManagedInvocation(input, invocationLog);
+    expect(input.managedAttempt?.promptSha256).toBe(sha256Hex(bytes));
   });
 
   for (const [parent, provider] of [

@@ -2,7 +2,6 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
 import {
-  access,
   mkdir,
   open,
   readFile,
@@ -10,7 +9,6 @@ import {
   rename,
   rm,
   unlink,
-  writeFile,
 } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import {
@@ -20,9 +18,27 @@ import {
   retry as retryLane,
   tick as tickLanes,
   type Lane,
+  type LaneCheck,
+  type LaneClock,
   type LaunchPlan,
   type RegisterParams,
 } from "./lanes.ts";
+import {
+  NotFoundError,
+  UserError,
+  UsageError,
+} from "./errors.ts";
+import {
+  errorCode,
+  pathExists as exists,
+  writeFileAtomically as atomicWrite,
+} from "./filesystem.ts";
+export {
+  NotFoundError,
+  UserError,
+  UsageError,
+  type NotFoundOutput,
+} from "./errors.ts";
 
 const UNIT_HEADER = "id\ttrack\tstate\tbranch\tpr\tsha\tbrief";
 const LEDGER_HEADER = "pr\tsha\tverdict\tevidence\tverifier\tts";
@@ -188,15 +204,20 @@ export interface OpenStoreOptions {
   readonly force?: boolean;
   readonly onLockStolen?: (holder: string) => void;
   readonly onStaleLock?: (holder: string) => void;
+  readonly now?: LaneClock;
 }
 
 export interface Store {
   readonly lanes: {
     readonly register: (params: RegisterParams) => Promise<Lane>;
     readonly tick: () => Promise<readonly LaunchPlan[]>;
-    readonly check: (unitId: string) => Promise<boolean>;
+    readonly check: (unitId: string) => Promise<LaneCheck>;
     readonly retry: (laneId: string) => Promise<LaunchPlan>;
-    readonly release: (params: { readonly laneId: string; readonly attemptId: string; readonly reason: string }) => Promise<Lane>;
+    readonly release: (params: {
+      readonly laneId: string;
+      readonly attemptId: string;
+      readonly reason: string;
+    }) => Promise<Lane>;
   };
   readonly units: {
     readonly add: (params: AddUnitParams) => Promise<Unit>;
@@ -236,32 +257,15 @@ export interface Store {
   readonly close: () => Promise<void>;
 }
 
-export interface NotFoundOutput {
-  readonly compact: string;
-  readonly json: unknown;
-}
-
-export class UserError extends Error {}
-export class UsageError extends UserError {}
-export class NotFoundError extends UserError {
-  public constructor(
-    message: string,
-    public readonly output?: NotFoundOutput
-  ) {
-    super(message);
+function unitIdSet(units: readonly Unit[]): ReadonlySet<string> {
+  const result = new Set<string>();
+  for (const unit of units) {
+    if (result.has(unit.id)) {
+      throw new UserError(`units.tsv contains duplicate unit id ${unit.id}`);
+    }
+    result.add(unit.id);
   }
-}
-
-function errorCode(error: unknown): string | null {
-  if (
-    error !== null &&
-    typeof error === "object" &&
-    "code" in error &&
-    typeof error.code === "string"
-  ) {
-    return error.code;
-  }
-  return null;
+  return result;
 }
 
 function errorMessage(error: unknown): string {
@@ -336,31 +340,6 @@ function positiveInteger(value: number, label: string): number {
     throw new UserError(`${label} must be a positive integer`);
   }
   return value;
-}
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch (error) {
-    if (errorCode(error) === "ENOENT") {
-      return false;
-    }
-    throw error;
-  }
-}
-
-async function atomicWrite(path: string, contents: string): Promise<void> {
-  const temporary = join(
-    dirname(path),
-    `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`
-  );
-  try {
-    await writeFile(temporary, contents, { flag: "wx" });
-    await rename(temporary, path);
-  } finally {
-    await rm(temporary, { force: true });
-  }
 }
 
 async function writeIfMissing(path: string, contents: string): Promise<void> {
@@ -1261,14 +1240,56 @@ export function openStore(
     lanes: {
       register: async (params) => {
         await beginWrite();
-        const unit = (await readUnits(store)).find((row) => row.id === params.unitId);
+        const units = await readUnits(store);
+        const unit = units.find((row) => row.id === params.unitId);
         if (unit === undefined) throw new NotFoundError(`unit ${params.unitId} not found`);
-        return registerLane(store, params);
+        return registerLane(
+          store,
+          params,
+          unitIdSet(units),
+          options.now
+        );
       },
-      tick: async () => { await beginWrite(); return tickLanes(store); },
-      check: async (unitId) => { await beginWrite(); return checkUnit(store, requiredCell(unitId, "unit id")); },
-      retry: async (laneId) => { await beginWrite(); return retryLane(store, requiredCell(laneId, "lane id")); },
-      release: async (params) => { await beginWrite(); return releaseLane(store, requiredCell(params.laneId, "lane id"), requiredCell(params.attemptId, "attempt id"), requiredLine(params.reason, "release reason")); },
+      tick: async () => {
+        await beginWrite();
+        const units = await readUnits(store);
+        return tickLanes(
+          store,
+          unitIdSet(units),
+          options.now
+        );
+      },
+      check: async (unitId) => {
+        await beginWrite();
+        const id = requiredCell(unitId, "unit id");
+        const units = await readUnits(store);
+        if (!units.some((row) => row.id === id)) {
+          throw new NotFoundError(`unit ${id} not found`);
+        }
+        return checkUnit(store, id, unitIdSet(units));
+      },
+      retry: async (laneId) => {
+        await beginWrite();
+        const units = await readUnits(store);
+        return retryLane(
+          store,
+          requiredCell(laneId, "lane id"),
+          unitIdSet(units),
+          options.now
+        );
+      },
+      release: async (params) => {
+        await beginWrite();
+        const units = await readUnits(store);
+        return releaseLane(
+          store,
+          requiredCell(params.laneId, "lane id"),
+          requiredCell(params.attemptId, "attempt id"),
+          requiredLine(params.reason, "release reason"),
+          unitIdSet(units),
+          options.now
+        );
+      },
     },
     units: {
       add: async (params) => {
@@ -1303,8 +1324,19 @@ export function openStore(
         if (index < 0 || old === undefined) {
           throw new NotFoundError(`unit ${id} not found`);
         }
-        if (old.state !== state && !(await checkUnit(store, id))) {
-          throw new UserError(`unit ${id} is blocked by incomplete managed provider lanes`);
+        const terminalReconciliation = state === "abandoned" || state === "zombie-reconciled";
+        if (
+          old.state !== state &&
+          !terminalReconciliation &&
+          !(await checkUnit(
+            store,
+            id,
+            unitIdSet(rows)
+          )).ready
+        ) {
+          throw new UserError(
+            `unit ${id} is blocked by incomplete managed provider lanes`
+          );
         }
         const row: Unit = {
           ...old,

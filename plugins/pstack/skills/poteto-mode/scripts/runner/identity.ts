@@ -19,7 +19,7 @@ type LaneFingerprintOptions = Pick<
   | "timeoutMs"
 >;
 
-export function sha256Hex(contents: string): string {
+export function sha256Hex(contents: string | Uint8Array): string {
   return createHash("sha256").update(contents).digest("hex");
 }
 
@@ -57,14 +57,14 @@ function identityFailure(
 }
 
 export interface PreparedPrompt {
-  readonly prompt: string;
+  readonly prompt: Uint8Array;
   readonly managedAttempt: VerifiedManagedAttempt | null;
 }
 
 export function preparePrompt(options: RunnerOptions): PreparedPrompt {
-  let prompt: string;
+  let prompt: Uint8Array;
   try {
-    prompt = readFileSync(options.promptPath, "utf8");
+    prompt = readFileSync(options.promptPath);
   } catch {
     if (options.managedAttempt !== null) {
       throw identityFailure(options.managedAttempt, "prompt-unreadable");

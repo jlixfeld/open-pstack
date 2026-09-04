@@ -63,7 +63,7 @@ function claudeEnvelope(stdout: string): JsonObject | null {
   }
 }
 
-function validSessionLimitMessage(message: string): boolean {
+export function isClaudeSessionLimitMessage(message: string): boolean {
   return message.length <= CLAUDE_SESSION_LIMIT_EVIDENCE_LIMIT &&
     (message === CLAUDE_SESSION_LIMIT_MESSAGE ||
       message.startsWith(`${CLAUDE_SESSION_LIMIT_MESSAGE} `));
@@ -82,7 +82,7 @@ export function parseClaudeSessionLimit(
     value.terminal_reason !== "api_error" ||
     value.api_error_status !== 429 ||
     result === null ||
-    !validSessionLimitMessage(result)
+    !isClaudeSessionLimitMessage(result)
   ) {
     return null;
   }

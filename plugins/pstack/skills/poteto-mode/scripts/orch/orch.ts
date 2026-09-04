@@ -22,6 +22,7 @@ import {
   PARENTS,
   PROVIDERS,
 } from "../runner/types.ts";
+import type { LaneCheck } from "./lanes.ts";
 
 ensureDependenciesInstalled();
 const {
@@ -98,9 +99,16 @@ interface LaneRegisterOptions {
   readonly timeout?: number;
 }
 
-interface LaneReleaseOptions { readonly attempt: string; readonly reason: string; }
+interface LaneReleaseOptions {
+  readonly attempt: string;
+  readonly reason: string;
+}
 
-class LaneBlockedError extends Error {}
+class LaneBlockedError extends Error {
+  constructor(readonly check: LaneCheck) {
+    super(`unit ${check.unitId} is blocked by ${check.blockingLaneIds.join(", ")}`);
+  }
+}
 
 interface FrontierSetOptions {
   readonly repo?: string;
@@ -345,7 +353,11 @@ function createProgram(io: Io): Command {
     .requiredOption("--mode <mode>", "access mode")
     .requiredOption("--prompt <path>", "prompt file")
     .requiredOption("--cwd <path>", "working directory")
-    .option("--interval-seconds <n>", "pause retry interval", positiveInteger)
+    .option(
+      "--interval-seconds <n>",
+      "pause retry interval (minimum 1800)",
+      positiveInteger
+    )
     .option("--timeout <seconds>", "explicit runner timeout", positiveInteger)
     .action((laneId: string, options: LaneRegisterOptions) =>
       runStore(
@@ -383,20 +395,38 @@ function createProgram(io: Io): Command {
         program,
         io,
         async (store) => {
-          if (!(await store.lanes.check(options.unit))) throw new LaneBlockedError();
-          return "READY";
+          const result = await store.lanes.check(options.unit);
+          if (!result.ready) throw new LaneBlockedError(result);
+          return result;
         },
-        String
+        () => "READY",
+        (result) => result
       )
     );
-  leaf(lane, "retry <lane-id>", "explicitly retry an ordinary failed lane").action((laneId: string) =>
-    runStore(program, io, (store) => store.lanes.retry(laneId), (plan) => `${plan.laneId}\t${plan.attemptId}`, (plan) => plan)
-  );
+  leaf(lane, "retry <lane-id>", "explicitly retry an ordinary failed lane")
+    .action((laneId: string) =>
+      runStore(
+        program,
+        io,
+        (store) => store.lanes.retry(laneId),
+        (plan) => `${plan.laneId}\t${plan.attemptId}`,
+        (plan) => plan
+      )
+    );
   leaf(lane, "release <lane-id>", "release a dead claimed attempt")
     .requiredOption("--attempt <attempt-id>", "claimed attempt id")
     .requiredOption("--reason <text>", "authoritative dead-process evidence")
     .action((laneId: string, options: LaneReleaseOptions) =>
-      runStore(program, io, (store) => store.lanes.release({ laneId, attemptId: options.attempt, reason: options.reason }), (result) => `${result.spec.laneId}\tinterrupted`)
+      runStore(
+        program,
+        io,
+        (store) => store.lanes.release({
+          laneId,
+          attemptId: options.attempt,
+          reason: options.reason,
+        }),
+        (result) => `${result.spec.laneId}\tinterrupted`
+      )
     );
   leaf(unit, "set <id>", "update a unit")
     .requiredOption("--state <state>", "unit state")
@@ -640,7 +670,11 @@ function createProgram(io: Io): Command {
 
 function handleError(error: unknown, program: Command, io: Io): number {
   if (error instanceof LaneBlockedError) {
-    io.stderr("BLOCKED\n");
+    if (program.opts<GlobalOptions>().json) {
+      io.stdout(`${JSON.stringify(error.check)}\n`);
+    } else {
+      io.stderr(`BLOCKED\t${error.check.blockingLaneIds.join(",")}\n`);
+    }
     return 3;
   }
   if (error instanceof CommanderError) {

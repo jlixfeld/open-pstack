@@ -3,7 +3,6 @@ import {
   existsSync,
   mkdirSync,
   openSync,
-  statSync,
   unlinkSync,
 } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -30,6 +29,7 @@ import type {
   VerifiedManagedAttempt,
 } from "./types.ts";
 import { UsageError } from "./types.ts";
+import { validateRunnerOptions } from "./validation.ts";
 
 const ERROR_EVIDENCE_LIMIT = 4_000;
 const GROK_PREFLIGHT_RETRY_DELAY_MS = 5_000;
@@ -224,7 +224,7 @@ async function runProcess(
   spec: CommandSpec,
   cwd: string,
   env: NodeJS.ProcessEnv,
-  prompt: string,
+  prompt: string | Uint8Array,
   deadlineAt: number | null,
   cancellation: RunCancellation
 ): Promise<ProcessResult> {
@@ -503,38 +503,6 @@ function modelProof(
   return null;
 }
 
-export function validateOptions(options: RunnerOptions): void {
-  if (options.parent === options.provider) {
-    throw new UsageError(
-      `provider ${options.provider} is native to parent ${options.parent}; use the parent subagent primitive`
-    );
-  }
-  if (options.model.trim().length === 0) throw new UsageError("model must not be empty");
-  if (options.provider === "grok" && options.managedAttempt !== null) {
-    throw new UsageError(
-      "managed Grok attempts are unsupported because Grok cannot consume verified prompt bytes"
-    );
-  }
-  if (
-    options.timeoutMs !== null &&
-    (!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0)
-  ) {
-    throw new UsageError("timeout must be greater than zero");
-  }
-  if (!existsSync(options.promptPath) || !statSync(options.promptPath).isFile()) {
-    throw new UsageError(`prompt is not a file: ${options.promptPath}`);
-  }
-  if (!existsSync(options.cwd) || !statSync(options.cwd).isDirectory()) {
-    throw new UsageError(`cwd is not a directory: ${options.cwd}`);
-  }
-  if (
-    options.promptPath === options.outputPath ||
-    options.promptPath === options.receiptPath
-  ) {
-    throw new UsageError("prompt, output, and receipt paths must be distinct");
-  }
-}
-
 interface LaneProgress {
   executable: string | null;
   preflight: RunnerReceipt["preflight"];
@@ -549,7 +517,7 @@ async function executeLane(
   invocation: CommandSpec,
   preflight: CommandSpec,
   progress: LaneProgress,
-  prompt: string,
+  prompt: Uint8Array,
   managedAttempt: VerifiedManagedAttempt | null
 ): Promise<RunResult> {
   const startedAt = new Date(started).toISOString();
@@ -883,7 +851,7 @@ export async function runLane(
   started: number = Date.now()
 ): Promise<RunResult> {
   const options = resolvedOptions(input);
-  validateOptions(options);
+  validateRunnerOptions(options);
   const deadlineAt = options.timeoutMs === null ? null : started + options.timeoutMs;
   const invocation = invocationCommand(options);
   const preflight = preflightCommand(options.provider);

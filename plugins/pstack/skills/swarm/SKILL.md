@@ -34,7 +34,7 @@ When a worker must start from a non-default branch, check that branch out in the
 
 Every brief stands alone. Include the goal, scope, exact slice or race arm, how to verify, and what to report. Reports use `PASS`, `ISSUES`, or `BLOCKED` with evidence.
 
-If a worker drops out, proceed with N-1 and note the provider, model, and receipt failure. Never substitute another provider silently.
+If a worker drops out, proceed with N-1 and note the provider, model, and receipt failure. Exit 75 with a `provider-paused` receipt is not a dropout: preserve the lane and keep its slice incomplete under the provider-dispatch pause contract. Never substitute another provider silently.
 
 ## Phase C: Aggregate
 
