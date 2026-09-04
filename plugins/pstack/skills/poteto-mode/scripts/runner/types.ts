@@ -58,6 +58,11 @@ export type ReceiptStatus =
   | "child-failed"
   | "malformed-output";
 
+export type FailureReceiptStatus = Exclude<
+  ReceiptStatus,
+  "complete" | "provider-paused"
+>;
+
 export interface NormalizedUsage {
   readonly inputTokens?: number;
   readonly cachedInputTokens?: number;
@@ -147,12 +152,31 @@ export interface RunnerReceiptBaseV2 {
   readonly costUsd: number | null;
 }
 
-export interface CompleteReceiptV2 extends RunnerReceiptBaseV2 {
+type ProviderReportedCompleteReceiptV2 = RunnerReceiptBaseV2 & {
   readonly status: "complete";
+  readonly provider: "claude" | "grok";
   readonly managedAttempt: VerifiedManagedAttempt | null;
+  readonly reportedModel: string;
+  readonly modelVerified: true;
+  readonly modelEvidence: "provider-report";
   readonly providerPause: null;
   readonly error: null;
-}
+};
+
+type PinnedArgvCompleteReceiptV2 = RunnerReceiptBaseV2 & {
+  readonly status: "complete";
+  readonly provider: "codex";
+  readonly managedAttempt: VerifiedManagedAttempt | null;
+  readonly reportedModel: null;
+  readonly modelVerified: false;
+  readonly modelEvidence: "pinned-argv";
+  readonly providerPause: null;
+  readonly error: null;
+};
+
+export type CompleteReceiptV2 =
+  | ProviderReportedCompleteReceiptV2
+  | PinnedArgvCompleteReceiptV2;
 
 export interface ProviderPausedReceiptV2 extends RunnerReceiptBaseV2 {
   readonly status: "provider-paused";
@@ -165,7 +189,7 @@ export interface ProviderPausedReceiptV2 extends RunnerReceiptBaseV2 {
 }
 
 export interface FailureReceiptV2 extends RunnerReceiptBaseV2 {
-  readonly status: Exclude<ReceiptStatus, "complete" | "provider-paused">;
+  readonly status: FailureReceiptStatus;
   readonly managedAttempt: UnverifiedManagedAttempt | VerifiedManagedAttempt | null;
   readonly modelVerified: false;
   readonly modelEvidence: null;

@@ -11,9 +11,10 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { invocationCommand, preflightCommand } from "./commands.ts";
+import { laneFingerprint, sha256Hex } from "./identity.ts";
 import { childEnvironment, runLane } from "./run.ts";
 import { main } from "./cli.ts";
 import type { Provider, RunnerOptions, RunnerReceipt } from "./types.ts";
@@ -201,36 +202,58 @@ function receipt(path: string): RunnerReceipt {
   return JSON.parse(readFileSync(path, "utf8")) as RunnerReceipt;
 }
 
-function sha256(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
-}
-
 function managedOptions(
   suffix: string = "managed-pause",
   timeoutMs: number | null = null
 ): RunnerOptions {
   const input = { ...options("claude", suffix), timeoutMs };
-  const promptSha256 = sha256(readFileSync(input.promptPath, "utf8"));
-  const laneFingerprint = sha256(JSON.stringify({
-    parent: input.parent,
-    provider: input.provider,
-    model: input.model,
-    effort: input.effort,
-    mode: input.mode,
-    cwd: input.cwd,
-    promptPath: input.promptPath,
-    promptSha256,
-    timeoutMs: input.timeoutMs,
-  }));
+  const promptSha256 = sha256Hex(readFileSync(input.promptPath, "utf8"));
   return {
     ...input,
     managedAttempt: {
       laneId: "manifest-review-claude",
       attemptId: "manifest-review-claude.000001",
-      laneFingerprint,
+      laneFingerprint: laneFingerprint(input, promptSha256),
       promptSha256,
     },
   };
+}
+
+function withManagedAttempt(input: RunnerOptions): RunnerOptions {
+  const promptSha256 = sha256Hex(readFileSync(input.promptPath, "utf8"));
+  return {
+    ...input,
+    managedAttempt: {
+      laneId: `managed-${input.provider}`,
+      attemptId: `managed-${input.provider}.000001`,
+      laneFingerprint: laneFingerprint(input, promptSha256),
+      promptSha256,
+    },
+  };
+}
+
+function expectManagedInvocation(input: RunnerOptions, invocationLog: string): void {
+  if (input.managedAttempt === null) {
+    throw new Error("managed test setup lost its claim");
+  }
+  const executable = join(bin, input.provider);
+  const invocation = invocationCommand(input);
+  const preflight = preflightCommand(input.provider);
+  expect(JSON.parse(readFileSync(invocationLog, "utf8"))).toEqual({
+    args: [...invocation.args],
+    cwd: realpathSync(input.cwd),
+    prompt: readFileSync(input.promptPath, "utf8"),
+  });
+  const recorded = receipt(input.receiptPath);
+  if (recorded.schemaVersion !== 2) {
+    throw new Error("managed invocation wrote a legacy receipt");
+  }
+  expect(recorded.argv).toEqual([executable, ...invocation.args]);
+  expect(recorded.preflight.argv).toEqual([executable, ...preflight.args]);
+  expect(recorded.managedAttempt).toEqual({
+    ...input.managedAttempt,
+    verified: true,
+  });
 }
 
 function runnerArgs(input: RunnerOptions): string[] {
@@ -372,10 +395,13 @@ describe("runLane", () => {
     it(`records Claude's structured session limit when the child exits ${exit}`, async () => {
       process.env.FAKE_CLAUDE_PAUSE_EXIT = String(exit);
       const input = managedOptions(`managed-pause-${exit}`);
+      const invocationLog = join(scratch, `managed-pause-${exit}.invocation.json`);
+      process.env.FAKE_INVOCATION_LOG_PATH = invocationLog;
 
       const result = await runLane(input);
 
       expect(result.exitCode).toBe(75);
+      expectManagedInvocation(input, invocationLog);
       expect(existsSync(input.outputPath)).toBe(false);
       expect(receipt(input.receiptPath)).toMatchObject({
         schemaVersion: 2,
@@ -404,7 +430,7 @@ describe("runLane", () => {
       ["string status", { FAKE_CLAUDE_PAUSE_STATUS: "string" }],
       ["wrong terminal reason", { FAKE_CLAUDE_PAUSE_REASON: "rate_limit" }],
       ["unrelated result", { FAKE_CLAUDE_PAUSE_RESULT: "HTTP 429" }],
-      ["malformed reset", { FAKE_CLAUDE_PAUSE_RESULT: "You've hit your session limit · resets 25:61pm (America/Toronto)" }],
+      ["wrong result prefix", { FAKE_CLAUDE_PAUSE_RESULT: "You've hit your usage limit" }],
     ];
     for (const [label, overrides] of cases) {
       process.env.FAKE_CLAUDE_PAUSE_EXIT = "1";
@@ -423,7 +449,11 @@ describe("runLane", () => {
     const input = managedOptions("managed-bad-digest");
     if (input.managedAttempt === null) throw new Error("managed test setup lost its claim");
     const preflightStarted = join(scratch, "managed-bad-digest.preflight");
+    const modelStarted = join(scratch, "managed-bad-digest.model");
+    const invocationLog = join(scratch, "managed-bad-digest.invocation.json");
     process.env.FAKE_PREFLIGHT_STARTED_PATH = preflightStarted;
+    process.env.FAKE_MODEL_STARTED_PATH = modelStarted;
+    process.env.FAKE_INVOCATION_LOG_PATH = invocationLog;
     const invalid: RunnerOptions = {
       ...input,
       managedAttempt: {
@@ -436,6 +466,8 @@ describe("runLane", () => {
 
     expect(result.exitCode).toBe(70);
     expect(existsSync(preflightStarted)).toBe(false);
+    expect(existsSync(modelStarted)).toBe(false);
+    expect(existsSync(invocationLog)).toBe(false);
     expect(existsSync(invalid.outputPath)).toBe(false);
     expect(receipt(invalid.receiptPath)).toMatchObject({
       schemaVersion: 2,
@@ -445,31 +477,155 @@ describe("runLane", () => {
         verified: false,
         reason: "prompt-digest-mismatch",
       },
+      providerPause: null,
     });
+  });
+
+  it("rejects every stale managed lane input with the correct prompt digest before preflight", async () => {
+    const mutations: Array<readonly [
+      string,
+      (input: RunnerOptions) => RunnerOptions,
+    ]> = [
+      ["model", (input) => ({ ...input, model: "claude-opus-5" })],
+      ["effort", (input) => ({ ...input, effort: "xhigh" })],
+      ["mode", (input) => ({ ...input, mode: "isolated-write" })],
+      ["cwd", (input) => {
+        const cwd = join(scratch, "stale-cwd-alternate");
+        mkdirSync(cwd, { recursive: true });
+        return { ...input, cwd };
+      }],
+      ["timeout", (input) => ({ ...input, timeoutMs: 1_000 })],
+    ];
+
+    for (const [field, mutate] of mutations) {
+      const input = mutate(managedOptions(`managed-stale-${field}`));
+      if (input.managedAttempt === null) {
+        throw new Error("managed test setup lost its claim");
+      }
+      const preflightStarted = join(scratch, `managed-stale-${field}.preflight`);
+      const modelStarted = join(scratch, `managed-stale-${field}.model`);
+      const invocationLog = join(scratch, `managed-stale-${field}.invocation.json`);
+      process.env.FAKE_PREFLIGHT_STARTED_PATH = preflightStarted;
+      process.env.FAKE_MODEL_STARTED_PATH = modelStarted;
+      process.env.FAKE_INVOCATION_LOG_PATH = invocationLog;
+
+      const result = await runLane(input);
+
+      expect(input.managedAttempt.promptSha256).toBe(
+        sha256Hex(readFileSync(input.promptPath, "utf8"))
+      );
+      expect(result.exitCode).toBe(70);
+      expect(existsSync(preflightStarted)).toBe(false);
+      expect(existsSync(modelStarted)).toBe(false);
+      expect(existsSync(invocationLog)).toBe(false);
+      expect(receipt(input.receiptPath)).toMatchObject({
+        status: "child-failed",
+        managedAttempt: {
+          ...input.managedAttempt,
+          verified: false,
+          reason: "lane-fingerprint-mismatch",
+        },
+        providerPause: null,
+      });
+    }
+  });
+
+  it("receipts an unreadable managed prompt without running preflight", async () => {
+    const input = managedOptions("managed-unreadable-prompt");
+    if (input.managedAttempt === null) throw new Error("managed test setup lost its claim");
+    const preflightStarted = join(scratch, "managed-unreadable-prompt.preflight");
+    const modelStarted = join(scratch, "managed-unreadable-prompt.model");
+    const invocationLog = join(scratch, "managed-unreadable-prompt.invocation.json");
+    process.env.FAKE_PREFLIGHT_STARTED_PATH = preflightStarted;
+    process.env.FAKE_MODEL_STARTED_PATH = modelStarted;
+    process.env.FAKE_INVOCATION_LOG_PATH = invocationLog;
+    chmodSync(input.promptPath, 0o000);
+    try {
+      const result = await runLane(input);
+
+      expect(result.exitCode).toBe(70);
+      expect(existsSync(preflightStarted)).toBe(false);
+      expect(existsSync(modelStarted)).toBe(false);
+      expect(existsSync(invocationLog)).toBe(false);
+      expect(existsSync(input.outputPath)).toBe(false);
+      expect(receipt(input.receiptPath)).toMatchObject({
+        status: "child-failed",
+        managedAttempt: {
+          ...input.managedAttempt,
+          verified: false,
+          reason: "prompt-unreadable",
+        },
+        providerPause: null,
+      });
+    } finally {
+      chmodSync(input.promptPath, 0o600);
+    }
+  });
+
+  it("rejects managed Grok before reserving artifacts or starting a provider", async () => {
+    const input = withManagedAttempt(options("grok", "managed-grok"));
+    const preflightStarted = join(scratch, "managed-grok.preflight");
+    const modelStarted = join(scratch, "managed-grok.model");
+    const invocationLog = join(scratch, "managed-grok.invocation.json");
+    process.env.FAKE_PREFLIGHT_STARTED_PATH = preflightStarted;
+    process.env.FAKE_MODEL_STARTED_PATH = modelStarted;
+    process.env.FAKE_INVOCATION_LOG_PATH = invocationLog;
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+
+    const exitCode = await main(runnerArgs(input).slice(1), Date.now(), {
+      stdout: (value) => stdout.push(value),
+      stderr: (value) => stderr.push(value),
+    });
+
+    expect(exitCode).toBe(64);
+    expect(stdout).toEqual([]);
+    expect(stderr.join("")).toContain(
+      "managed Grok attempts are unsupported because Grok cannot consume verified prompt bytes"
+    );
+    expect(existsSync(preflightStarted)).toBe(false);
+    expect(existsSync(modelStarted)).toBe(false);
+    expect(existsSync(invocationLog)).toBe(false);
+    expect(existsSync(input.outputPath)).toBe(false);
+    expect(existsSync(input.receiptPath)).toBe(false);
   });
 
   it("gives an explicit timeout precedence over a pending pause envelope", async () => {
     process.env.FAKE_CLAUDE_PAUSE_EXIT = "1";
-    process.env.FAKE_MODEL_DELAY_MS = "250";
-    const input = managedOptions("managed-pause-timeout", 30);
+    process.env.FAKE_CLAUDE_PAUSE_WAIT_FOR_SIGNAL = "1";
+    const modelStarted = join(scratch, "managed-pause-timeout.model");
+    const invocationLog = join(scratch, "managed-pause-timeout.invocation.json");
+    process.env.FAKE_MODEL_STARTED_PATH = modelStarted;
+    process.env.FAKE_INVOCATION_LOG_PATH = invocationLog;
+    const input = managedOptions("managed-pause-timeout", 1_000);
 
     const result = await runLane(input);
 
     expect(result.exitCode).toBe(124);
+    expect(existsSync(modelStarted)).toBe(true);
+    expectManagedInvocation(input, invocationLog);
     expect(receipt(input.receiptPath)).toMatchObject({
       status: "timed-out",
+      preflight: { status: "passed" },
       providerPause: null,
+      error: {
+        evidence: expect.stringContaining("You've hit your session limit"),
+      },
     });
   });
 
   it("gives cancellation precedence over a received pause envelope", async () => {
     const input = managedOptions("managed-pause-cancelled");
+    const modelStarted = join(scratch, "managed-pause-cancelled.model");
+    const invocationLog = join(scratch, "managed-pause-cancelled.invocation.json");
     const runner = Bun.spawn([process.execPath, ...runnerArgs(input)], {
       cwd: scratch,
       env: {
         ...process.env,
         FAKE_CLAUDE_PAUSE_EXIT: "1",
         FAKE_CLAUDE_PAUSE_WAIT_FOR_SIGNAL: "1",
+        FAKE_MODEL_STARTED_PATH: modelStarted,
+        FAKE_INVOCATION_LOG_PATH: invocationLog,
       },
       stdout: "pipe",
       stderr: "pipe",
@@ -481,47 +637,32 @@ describe("runLane", () => {
 
     expect(await exitWithin(runner, 3_000)).toBe(130);
     await Promise.all([stdout, stderr]);
+    expect(existsSync(modelStarted)).toBe(true);
+    expectManagedInvocation(input, invocationLog);
     expect(receipt(input.receiptPath)).toMatchObject({
       status: "cancelled",
       providerPause: null,
+      error: {
+        evidence: expect.stringContaining("You've hit your session limit"),
+      },
     });
   });
 
-  it("binds a successful managed receipt to its verified claim", async () => {
+  it("binds a successful managed receipt to the exact provider invocation", async () => {
     const input = managedOptions("managed-complete");
+    const invocationLog = join(scratch, "managed-complete.invocation.json");
+    process.env.FAKE_INVOCATION_LOG_PATH = invocationLog;
 
     const result = await runLane(input);
 
     expect(result.exitCode).toBe(0);
+    expectManagedInvocation(input, invocationLog);
     expect(receipt(input.receiptPath)).toMatchObject({
       schemaVersion: 2,
       status: "complete",
       managedAttempt: { ...input.managedAttempt, verified: true },
       providerPause: null,
       error: null,
-    });
-  });
-
-  it("passes the exact managed prompt and Claude route to the provider boundary", async () => {
-    const input = managedOptions("managed-boundary");
-    const invocationLog = join(scratch, "managed-boundary.json");
-    process.env.FAKE_INVOCATION_LOG_PATH = invocationLog;
-
-    expect((await runLane(input)).exitCode).toBe(0);
-
-    const invocation = JSON.parse(readFileSync(invocationLog, "utf8"));
-    expect(invocation.cwd).toBe(realpathSync(input.cwd));
-    expect(invocation.prompt).toBe("Return the marker.");
-    expect(invocation.args).toEqual(expect.arrayContaining([
-      "--model",
-      input.model,
-      "--effort",
-      input.effort,
-      "--permission-mode",
-      "plan",
-    ]));
-    expect(receipt(input.receiptPath)).toMatchObject({
-      managedAttempt: { ...input.managedAttempt, verified: true },
     });
   });
 

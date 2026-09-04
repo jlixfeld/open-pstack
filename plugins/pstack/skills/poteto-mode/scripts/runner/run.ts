@@ -3,30 +3,30 @@ import {
   existsSync,
   mkdirSync,
   openSync,
-  readFileSync,
-  renameSync,
   statSync,
   unlinkSync,
-  writeFileSync,
 } from "node:fs";
-import { createHash, randomUUID } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { invocationCommand, preflightCommand, type CommandSpec } from "./commands.ts";
+import { ManagedIdentityError, preparePrompt } from "./identity.ts";
 import {
   parseClaudePauseTelemetry,
   parseClaudeSessionLimit,
   parseProviderOutput,
   reportedModelMatches,
 } from "./parse-output.ts";
+import {
+  buildReceipt,
+  finalizeReceipt,
+  finalizeReservation,
+  type CompleteModelProof,
+} from "./receipt.ts";
 import type {
-  ManagedAttemptClaim,
+  FailureReceiptStatus,
   Provider,
   ReceiptStatus,
   RunnerOptions,
   RunnerReceipt,
-  RunnerReceiptBaseV2,
-  RunnerReceiptV2,
-  UnverifiedManagedAttempt,
   VerifiedManagedAttempt,
 } from "./types.ts";
 import { UsageError } from "./types.ts";
@@ -84,20 +84,6 @@ function reserveOutputs(options: RunnerOptions): void {
     removeIfExists(options.outputPath);
     throw error;
   }
-}
-
-function replaceReservation(path: string, contents: string): void {
-  const temporaryPath = `${path}.${randomUUID()}.tmp`;
-  writeFileSync(temporaryPath, contents, {
-    encoding: "utf8",
-    mode: 0o600,
-    flag: "wx",
-  });
-  renameSync(temporaryPath, path);
-}
-
-function writeReceipt(path: string, receipt: RunnerReceipt): void {
-  replaceReservation(path, `${JSON.stringify(receipt, null, 2)}\n`);
 }
 
 function installRunCancellation(): RunCancellation {
@@ -493,13 +479,14 @@ function modelProof(
   provider: Provider,
   requested: string,
   reported: string | null
-): {
-  readonly reportedModel: string | null;
-  readonly modelVerified: boolean;
-  readonly modelEvidence: "provider-report" | "pinned-argv" | null;
-} {
-  if (reportedModelMatches(requested, reported)) {
+): CompleteModelProof | null {
+  if (
+    provider !== "codex" &&
+    reported !== null &&
+    reportedModelMatches(requested, reported)
+  ) {
     return {
+      provider,
       reportedModel: reported,
       modelVerified: true,
       modelEvidence: "provider-report",
@@ -507,104 +494,13 @@ function modelProof(
   }
   if (provider === "codex" && reported === null) {
     return {
+      provider,
       reportedModel: null,
       modelVerified: false,
       modelEvidence: "pinned-argv",
     };
   }
-  return {
-    reportedModel: reported,
-    modelVerified: false,
-    modelEvidence: null,
-  };
-}
-
-type ReceiptDetails = Omit<
-  RunnerReceiptBaseV2,
-  | "schemaVersion"
-  | "parent"
-  | "provider"
-  | "model"
-  | "effort"
-  | "mode"
-  | "cwd"
-  | "promptPath"
-  | "outputPath"
-  | "receiptPath"
-  | "timeoutMs"
-> & {
-  readonly status: ReceiptStatus;
-  readonly reportedModel: string | null;
-  readonly modelVerified: boolean;
-  readonly modelEvidence: "provider-report" | "pinned-argv" | null;
-  readonly sessionId: string | null;
-  readonly usage: RunnerReceiptBaseV2["usage"];
-  readonly costUsd: number | null;
-  readonly providerPause?: import("./types.ts").ClaudeSessionLimitPause;
-  readonly managedAttempt?: UnverifiedManagedAttempt;
-  readonly error: { readonly message: string; readonly evidence: string } | null;
-};
-
-function verifiedAttempt(options: RunnerOptions): VerifiedManagedAttempt | null {
-  if (options.managedAttempt === null) return null;
-  return { ...options.managedAttempt, verified: true };
-}
-
-function completeReceipt(
-  options: RunnerOptions,
-  partial: ReceiptDetails
-): RunnerReceiptV2 {
-  const base = {
-    parent: options.parent,
-    provider: options.provider,
-    model: options.model,
-    effort: options.effort,
-    mode: options.mode,
-    cwd: options.cwd,
-    promptPath: options.promptPath,
-    outputPath: options.outputPath,
-  };
-  const common = {
-    ...base,
-    schemaVersion: 2 as const,
-    receiptPath: options.receiptPath,
-    timeoutMs: options.timeoutMs,
-    ...partial,
-  };
-  if (partial.status === "complete") {
-    return {
-      ...common,
-      status: "complete",
-      managedAttempt: verifiedAttempt(options),
-      providerPause: null,
-      error: null,
-    };
-  }
-  if (partial.status === "provider-paused" && options.provider === "claude" && partial.providerPause !== undefined) {
-    return {
-      ...common,
-      status: "provider-paused",
-      provider: "claude",
-      managedAttempt: verifiedAttempt(options),
-      modelVerified: false,
-      modelEvidence: null,
-      providerPause: partial.providerPause,
-      error: null,
-    };
-  }
-  if (partial.status === "provider-paused") {
-    throw new Error("terminal receipt variant did not match its status");
-  }
-  if (partial.error === null) throw new Error("failure receipt requires error details");
-  return {
-    ...common,
-    status: partial.status,
-    managedAttempt: partial.managedAttempt ?? verifiedAttempt(options),
-    modelVerified: false,
-    modelEvidence: null,
-    providerPause: null,
-    error: partial.error,
-  };
+  return null;
 }
 
 export function validateOptions(options: RunnerOptions): void {
@@ -614,6 +510,11 @@ export function validateOptions(options: RunnerOptions): void {
     );
   }
   if (options.model.trim().length === 0) throw new UsageError("model must not be empty");
+  if (options.provider === "grok" && options.managedAttempt !== null) {
+    throw new UsageError(
+      "managed Grok attempts are unsupported because Grok cannot consume verified prompt bytes"
+    );
+  }
   if (
     options.timeoutMs !== null &&
     (!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0)
@@ -634,62 +535,6 @@ export function validateOptions(options: RunnerOptions): void {
   }
 }
 
-class ManagedIdentityError extends Error {
-  readonly attempt: UnverifiedManagedAttempt;
-
-  constructor(attempt: UnverifiedManagedAttempt) {
-    super(`managed attempt identity could not be verified: ${attempt.reason}`);
-    this.attempt = attempt;
-  }
-}
-
-function digest(contents: string): string {
-  return createHash("sha256").update(contents).digest("hex");
-}
-
-function laneFingerprint(options: RunnerOptions, promptSha256: string): string {
-  return digest(JSON.stringify({
-    parent: options.parent,
-    provider: options.provider,
-    model: options.model,
-    effort: options.effort,
-    mode: options.mode,
-    cwd: options.cwd,
-    promptPath: options.promptPath,
-    promptSha256,
-    timeoutMs: options.timeoutMs,
-  }));
-}
-
-function identityFailure(
-  claim: ManagedAttemptClaim,
-  reason: UnverifiedManagedAttempt["reason"]
-): ManagedIdentityError {
-  return new ManagedIdentityError({ ...claim, verified: false, reason });
-}
-
-function preparedPrompt(options: RunnerOptions): string {
-  let prompt: string;
-  try {
-    prompt = readFileSync(options.promptPath, "utf8");
-  } catch {
-    if (options.managedAttempt !== null) {
-      throw identityFailure(options.managedAttempt, "prompt-unreadable");
-    }
-    throw new Error(`could not read prompt: ${options.promptPath}`);
-  }
-  if (options.managedAttempt === null) return prompt;
-
-  const promptSha256 = digest(prompt);
-  if (promptSha256 !== options.managedAttempt.promptSha256) {
-    throw identityFailure(options.managedAttempt, "prompt-digest-mismatch");
-  }
-  if (laneFingerprint(options, promptSha256) !== options.managedAttempt.laneFingerprint) {
-    throw identityFailure(options.managedAttempt, "lane-fingerprint-mismatch");
-  }
-  return prompt;
-}
-
 interface LaneProgress {
   executable: string | null;
   preflight: RunnerReceipt["preflight"];
@@ -704,7 +549,8 @@ async function executeLane(
   invocation: CommandSpec,
   preflight: CommandSpec,
   progress: LaneProgress,
-  prompt: string
+  prompt: string,
+  managedAttempt: VerifiedManagedAttempt | null
 ): Promise<RunResult> {
   const startedAt = new Date(started).toISOString();
   const env = childEnvironment(options.provider);
@@ -727,8 +573,10 @@ async function executeLane(
     const terminalPreflight = preflightState.status === "not-run"
       ? { ...preflightState, status }
       : preflightState;
-    receipt = completeReceipt(options, {
+    receipt = buildReceipt(options, {
       status,
+      provider: options.provider,
+      managedAttempt,
       startedAt,
       completedAt: new Date(completed).toISOString(),
       elapsedMs: completed - started,
@@ -737,12 +585,6 @@ async function executeLane(
       argv: [executable ?? invocation.command, ...invocation.args],
       exitCode: null,
       signal: null,
-      reportedModel: null,
-      modelVerified: false,
-      modelEvidence: null,
-      sessionId: null,
-      usage: null,
-      costUsd: null,
       error: {
         message: receivedSignal === null
           ? `explicit deadline elapsed ${phase}`
@@ -751,7 +593,7 @@ async function executeLane(
       },
     });
     removeIfExists(options.outputPath);
-    writeReceipt(options.receiptPath, receipt);
+    finalizeReceipt(options.receiptPath, receipt);
     return { exitCode: statusExitCode(status), receipt };
   };
 
@@ -764,8 +606,10 @@ async function executeLane(
 
   if (executable === null) {
     const completed = Date.now();
-    receipt = completeReceipt(options, {
+    receipt = buildReceipt(options, {
       status: "unavailable-cli",
+      provider: options.provider,
+      managedAttempt,
       startedAt,
       completedAt: new Date(completed).toISOString(),
       elapsedMs: completed - started,
@@ -774,19 +618,13 @@ async function executeLane(
       argv: [invocation.command, ...invocation.args],
       exitCode: null,
       signal: null,
-      reportedModel: null,
-      modelVerified: false,
-      modelEvidence: null,
-      sessionId: null,
-      usage: null,
-      costUsd: null,
       error: {
         message: `${invocation.command} executable not found`,
         evidence: "",
       },
     });
     removeIfExists(options.outputPath);
-    writeReceipt(options.receiptPath, receipt);
+    finalizeReceipt(options.receiptPath, receipt);
     return { exitCode: statusExitCode(receipt.status), receipt };
   }
 
@@ -881,13 +719,15 @@ async function executeLane(
     const preflightFailure = preflightAssessment.kind === "failed"
       ? preflightAssessment.receiptStatus
       : "child-failed";
-    const status: ReceiptStatus = preflightResult.cancelledBy !== null
+    const status: FailureReceiptStatus = preflightResult.cancelledBy !== null
       ? "cancelled"
       : preflightResult.timedOut
         ? "timed-out"
         : preflightFailure;
-    receipt = completeReceipt(options, {
+    receipt = buildReceipt(options, {
       status,
+      provider: options.provider,
+      managedAttempt,
       startedAt,
       completedAt: new Date(completed).toISOString(),
       elapsedMs: completed - started,
@@ -896,12 +736,6 @@ async function executeLane(
       argv: [executable, ...invocation.args],
       exitCode: preflightResult.exitCode,
       signal: preflightResult.signal,
-      reportedModel: null,
-      modelVerified: false,
-      modelEvidence: null,
-      sessionId: null,
-      usage: null,
-      costUsd: null,
       error: {
         message: preflightResult.cancelledBy !== null
           ? `launcher received ${preflightResult.cancelledBy} during preflight`
@@ -912,7 +746,7 @@ async function executeLane(
       },
     });
     removeIfExists(options.outputPath);
-    writeReceipt(options.receiptPath, receipt);
+    finalizeReceipt(options.receiptPath, receipt);
     return { exitCode: statusExitCode(status), receipt };
   }
 
@@ -944,45 +778,44 @@ async function executeLane(
     signal: result.signal,
   } as const;
 
-  const pause = result.cancelledBy === null && !result.timedOut && options.provider === "claude"
-    ? parseClaudeSessionLimit(result.stdout, base.completedAt)
-    : null;
-  if (pause !== null) {
-    const telemetry = parseClaudePauseTelemetry(result.stdout, options.model);
-    receipt = completeReceipt(options, {
-      ...base,
-      status: "provider-paused",
-      reportedModel: telemetry?.reportedModel ?? null,
-      modelVerified: false,
-      modelEvidence: null,
-      sessionId: telemetry?.sessionId ?? null,
-      usage: telemetry?.usage ?? null,
-      costUsd: telemetry?.costUsd ?? null,
-      providerPause: pause,
-      error: null,
-    });
-    removeIfExists(options.outputPath);
-    writeReceipt(options.receiptPath, receipt);
-    return { exitCode: statusExitCode(receipt.status), receipt };
+  if (
+    options.provider === "claude" &&
+    result.cancelledBy === null &&
+    !result.timedOut
+  ) {
+    const pause = parseClaudeSessionLimit(result.stdout, base.completedAt);
+    if (pause !== null) {
+      const telemetry = parseClaudePauseTelemetry(result.stdout, options.model);
+      receipt = buildReceipt(options, {
+        ...base,
+        status: "provider-paused",
+        provider: options.provider,
+        managedAttempt,
+        reportedModel: telemetry?.reportedModel ?? null,
+        sessionId: telemetry?.sessionId ?? null,
+        usage: telemetry?.usage ?? null,
+        costUsd: telemetry?.costUsd ?? null,
+        providerPause: pause,
+      });
+      removeIfExists(options.outputPath);
+      finalizeReceipt(options.receiptPath, receipt);
+      return { exitCode: statusExitCode(receipt.status), receipt };
+    }
   }
 
   if (result.cancelledBy !== null || result.timedOut || result.exitCode !== 0) {
     const rawFailureEvidence = `${result.stderr}\n${result.stdout}`;
     const failureEvidence = evidence(rawFailureEvidence);
-    const status: ReceiptStatus = result.cancelledBy !== null
+    const status: FailureReceiptStatus = result.cancelledBy !== null
       ? "cancelled"
       : result.timedOut
         ? "timed-out"
         : unavailableStatus(rawFailureEvidence);
-    receipt = completeReceipt(options, {
+    receipt = buildReceipt(options, {
       ...base,
       status,
-      reportedModel: null,
-      modelVerified: false,
-      modelEvidence: null,
-      sessionId: null,
-      usage: null,
-      costUsd: null,
+      provider: options.provider,
+      managedAttempt,
       error: {
         message: result.cancelledBy !== null
           ? result.signal === result.cancelledBy
@@ -995,7 +828,7 @@ async function executeLane(
       },
     });
     removeIfExists(options.outputPath);
-    writeReceipt(options.receiptPath, receipt);
+    finalizeReceipt(options.receiptPath, receipt);
     return { exitCode: statusExitCode(status), receipt };
   }
 
@@ -1011,33 +844,29 @@ async function executeLane(
       options.model,
       parsed.reportedModel
     );
-    if (!proof.modelVerified && proof.modelEvidence !== "pinned-argv") {
+    if (proof === null) {
       throw new Error(
         `requested model ${options.model} was not reported by ${options.provider}`
       );
     }
-    replaceReservation(options.outputPath, parsed.text);
-    receipt = completeReceipt(options, {
+    finalizeReservation(options.outputPath, parsed.text);
+    receipt = buildReceipt(options, {
       ...base,
       status: "complete",
-      ...proof,
+      modelProof: proof,
+      managedAttempt,
       sessionId: parsed.sessionId,
       usage: parsed.usage,
       costUsd: parsed.costUsd,
-      error: null,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     removeIfExists(options.outputPath);
-    receipt = completeReceipt(options, {
+    receipt = buildReceipt(options, {
       ...base,
       status: "malformed-output",
-      reportedModel: null,
-      modelVerified: false,
-      modelEvidence: null,
-      sessionId: null,
-      usage: null,
-      costUsd: null,
+      provider: options.provider,
+      managedAttempt,
       error: {
         message,
         evidence: evidence(`${result.stderr}\n${result.stdout}`),
@@ -1045,7 +874,7 @@ async function executeLane(
     });
   }
 
-  writeReceipt(options.receiptPath, receipt);
+  finalizeReceipt(options.receiptPath, receipt);
   return { exitCode: statusExitCode(receipt.status), receipt };
 }
 
@@ -1068,10 +897,12 @@ export async function runLane(
     argv: [invocation.command, ...invocation.args],
   };
   const cancellation = installRunCancellation();
+  let verifiedManagedAttempt: VerifiedManagedAttempt | null = null;
   try {
     reserveOutputs(options);
     try {
-      const prompt = preparedPrompt(options);
+      const prepared = preparePrompt(options);
+      verifiedManagedAttempt = prepared.managedAttempt;
       return await executeLane(
         options,
         cancellation,
@@ -1080,12 +911,13 @@ export async function runLane(
         invocation,
         preflight,
         progress,
-        prompt
+        prepared.prompt,
+        prepared.managedAttempt
       );
     } catch (error) {
       const completed = Date.now();
       const signal = cancellation.signal;
-      const status: ReceiptStatus = signal !== null
+      const status: FailureReceiptStatus = signal !== null
         ? "cancelled"
         : deadlineAt !== null && completed >= deadlineAt
           ? "timed-out"
@@ -1094,8 +926,9 @@ export async function runLane(
       const terminalPreflight = progress.preflight.status === "not-run" && status !== "child-failed"
         ? { ...progress.preflight, status }
         : progress.preflight;
-      const receipt = completeReceipt(options, {
+      const receipt = buildReceipt(options, {
         status,
+        provider: options.provider,
         startedAt: new Date(started).toISOString(),
         completedAt: new Date(completed).toISOString(),
         elapsedMs: completed - started,
@@ -1104,13 +937,9 @@ export async function runLane(
         argv: progress.argv,
         exitCode: null,
         signal: null,
-        reportedModel: null,
-        modelVerified: false,
-        modelEvidence: null,
-        sessionId: null,
-        usage: null,
-        costUsd: null,
-        managedAttempt: error instanceof ManagedIdentityError ? error.attempt : undefined,
+        managedAttempt: error instanceof ManagedIdentityError
+          ? error.attempt
+          : verifiedManagedAttempt,
         error: {
           message: status === "cancelled"
             ? `launcher received ${signal} after reserving output paths`
@@ -1121,7 +950,7 @@ export async function runLane(
         },
       });
       removeIfExists(options.outputPath);
-      writeReceipt(options.receiptPath, receipt);
+      finalizeReceipt(options.receiptPath, receipt);
       return { exitCode: statusExitCode(status), receipt };
     }
   } finally {

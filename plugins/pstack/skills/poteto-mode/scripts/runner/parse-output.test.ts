@@ -41,12 +41,32 @@ describe("parseProviderOutput", () => {
     });
   });
 
+  it("keeps minute-less and unknown-zone reset evidence opaque", () => {
+    const evidence = [
+      "You've hit your session limit · resets 2pm (America/Toronto)",
+      "You've hit your session limit · resets someday (Mars/Olympus Mons)",
+    ];
+    for (const result of evidence) {
+      expect(parseClaudeSessionLimit(
+        JSON.stringify({
+          type: "result",
+          is_error: true,
+          terminal_reason: "api_error",
+          api_error_status: 429,
+          result,
+        }),
+        "2026-09-04T18:00:00.000Z"
+      )?.resetEvidence).toBe(result);
+    }
+  });
+
   it("rejects unstructured and structurally invalid Claude pause lookalikes", () => {
     const observedAt = "2026-09-04T18:00:00.000Z";
     const invalid = [
       "You've hit your session limit · resets 2:10pm (America/Toronto)",
       "{",
       JSON.stringify({
+        type: "result",
         is_error: true,
         terminal_reason: "api_error",
         api_error_status: "429",
@@ -56,11 +76,28 @@ describe("parseProviderOutput", () => {
         is_error: true,
         terminal_reason: "api_error",
         api_error_status: 429,
-        result: "You've hit your session limit · resets 2:10pm (Not/AZone)",
+        result: "You've hit your session limit",
       }),
       JSON.stringify({
         type: "turn.failed",
-        error: { message: "You've hit your session limit" },
+        is_error: true,
+        terminal_reason: "api_error",
+        api_error_status: 429,
+        result: "You've hit your session limit",
+      }),
+      JSON.stringify({
+        type: "result",
+        is_error: true,
+        terminal_reason: "api_error",
+        api_error_status: 429,
+        result: "You've hit your session limitations",
+      }),
+      JSON.stringify({
+        type: "result",
+        is_error: true,
+        terminal_reason: "api_error",
+        api_error_status: 429,
+        result: `You've hit your session limit ${"x".repeat(1_000)}`,
       }),
     ];
     for (const stdout of invalid) {

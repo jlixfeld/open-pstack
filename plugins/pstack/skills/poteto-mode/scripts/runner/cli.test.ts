@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { parseArgs } from "./cli.ts";
 
 function argv(extra: readonly string[] = []): string[] {
@@ -51,6 +51,32 @@ describe("runner CLI parsing", () => {
     expect(() => parseArgs(argv(["--lane-id", "manifest-review-claude"]))).toThrow(
       "must be provided together"
     );
+  });
+
+  it("normalizes every path before managed identity is checked", () => {
+    const digest = "a".repeat(64);
+    const parsed = parseArgs(argv([
+      "--prompt", "prompt.md",
+      "--cwd", ".",
+      "--output", "output.md",
+      "--receipt", "receipt.json",
+      "--lane-id", "lane",
+      "--attempt-id", "lane.000001",
+      "--lane-fingerprint", digest,
+      "--prompt-sha256", digest,
+    ]));
+    expect(parsed).toMatchObject({
+      promptPath: resolve("prompt.md"),
+      cwd: resolve("."),
+      outputPath: resolve("output.md"),
+      receiptPath: resolve("receipt.json"),
+      managedAttempt: {
+        laneId: "lane",
+        attemptId: "lane.000001",
+        laneFingerprint: digest,
+        promptSha256: digest,
+      },
+    });
   });
 
   it("rejects a non-positive timeout", () => {

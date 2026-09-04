@@ -7,6 +7,9 @@ import type {
 
 type JsonObject = Record<string, unknown>;
 
+const CLAUDE_SESSION_LIMIT_MESSAGE = "You've hit your session limit";
+const CLAUDE_SESSION_LIMIT_EVIDENCE_LIMIT = 1_000;
+
 function object(value: unknown): JsonObject | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as JsonObject)
@@ -61,27 +64,9 @@ function claudeEnvelope(stdout: string): JsonObject | null {
 }
 
 function validSessionLimitMessage(message: string): boolean {
-  const match = /^You've hit your session limit(?: · resets (\d{1,2}):(\d{2})(am|pm) \(([^()]+)\))?$/.exec(message);
-  if (match === null) return false;
-  const [, hour, minute, meridiem, timeZone] = match;
-  if (hour === undefined) return true;
-  const hourValue = Number(hour);
-  if (
-    hourValue < 1 ||
-    hourValue > 12 ||
-    minute === undefined ||
-    Number(minute) > 59 ||
-    (meridiem !== "am" && meridiem !== "pm") ||
-    timeZone === undefined
-  ) {
-    return false;
-  }
-  try {
-    Intl.DateTimeFormat("en", { timeZone });
-    return true;
-  } catch {
-    return false;
-  }
+  return message.length <= CLAUDE_SESSION_LIMIT_EVIDENCE_LIMIT &&
+    (message === CLAUDE_SESSION_LIMIT_MESSAGE ||
+      message.startsWith(`${CLAUDE_SESSION_LIMIT_MESSAGE} `));
 }
 
 export function parseClaudeSessionLimit(
@@ -92,6 +77,7 @@ export function parseClaudeSessionLimit(
   const result = typeof value?.result === "string" ? value.result.trim() : null;
   if (
     value === null ||
+    value.type !== "result" ||
     value.is_error !== true ||
     value.terminal_reason !== "api_error" ||
     value.api_error_status !== 429 ||
