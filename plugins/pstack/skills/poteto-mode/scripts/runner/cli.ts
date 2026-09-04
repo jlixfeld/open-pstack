@@ -16,7 +16,8 @@ import {
 
 const HELP = `Usage: pstack-runner --parent <claude|codex> --provider <claude|codex|grok> \\
   --model <slug> --effort <level> --mode <read-only|isolated-write> \\
-  --prompt <file> --cwd <dir> --output <file> --receipt <file> [--timeout <seconds>]
+  --prompt <file> --cwd <dir> --output <file> --receipt <file> [--timeout <seconds>] \\
+  [--lane-id <id> --attempt-id <id> --lane-fingerprint <sha256> --prompt-sha256 <sha256>]
 
 Runs exactly one external model lane. Same-provider calls are rejected; use the
 parent harness's native subagent primitive for those lanes. Output and receipt
@@ -57,6 +58,40 @@ function stringValue(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+function sha256(name: string, value: string): string {
+  if (!/^[a-f0-9]{64}$/i.test(value)) {
+    throw new UsageError(`${name} must be a SHA-256 hex digest`);
+  }
+  return value.toLowerCase();
+}
+
+function managedAttempt(values: {
+  readonly laneId: unknown;
+  readonly attemptId: unknown;
+  readonly laneFingerprint: unknown;
+  readonly promptSha256: unknown;
+}): RunnerOptions["managedAttempt"] {
+  const entries = [
+    ["lane-id", stringValue(values.laneId)],
+    ["attempt-id", stringValue(values.attemptId)],
+    ["lane-fingerprint", stringValue(values.laneFingerprint)],
+    ["prompt-sha256", stringValue(values.promptSha256)],
+  ] as const;
+  const supplied = entries.filter(([, value]) => value !== undefined);
+  if (supplied.length === 0) return null;
+  if (supplied.length !== entries.length) {
+    throw new UsageError(
+      "lane-id, attempt-id, lane-fingerprint, and prompt-sha256 must be provided together"
+    );
+  }
+  return {
+    laneId: required("lane-id", entries[0][1]),
+    attemptId: required("attempt-id", entries[1][1]),
+    laneFingerprint: sha256("lane-fingerprint", required("lane-fingerprint", entries[2][1])),
+    promptSha256: sha256("prompt-sha256", required("prompt-sha256", entries[3][1])),
+  };
+}
+
 export function parseArgs(argv: readonly string[]): RunnerOptions | null {
   let parsed: ReturnType<typeof parseNodeArgs>;
   try {
@@ -75,6 +110,10 @@ export function parseArgs(argv: readonly string[]): RunnerOptions | null {
         output: { type: "string" },
         receipt: { type: "string" },
         timeout: { type: "string" },
+        "lane-id": { type: "string" },
+        "attempt-id": { type: "string" },
+        "lane-fingerprint": { type: "string" },
+        "prompt-sha256": { type: "string" },
         help: { type: "boolean", short: "h", default: false },
       },
     });
@@ -113,6 +152,12 @@ export function parseArgs(argv: readonly string[]): RunnerOptions | null {
     outputPath: required("output", stringValue(parsed.values.output)),
     receiptPath: required("receipt", stringValue(parsed.values.receipt)),
     timeoutMs: timeoutSeconds === null ? null : timeoutSeconds * 1_000,
+    managedAttempt: managedAttempt({
+      laneId: parsed.values["lane-id"],
+      attemptId: parsed.values["attempt-id"],
+      laneFingerprint: parsed.values["lane-fingerprint"],
+      promptSha256: parsed.values["prompt-sha256"],
+    }),
   });
 }
 

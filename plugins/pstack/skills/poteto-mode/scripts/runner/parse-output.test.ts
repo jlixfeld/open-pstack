@@ -41,6 +41,33 @@ describe("parseProviderOutput", () => {
     });
   });
 
+  it("rejects unstructured and structurally invalid Claude pause lookalikes", () => {
+    const observedAt = "2026-09-04T18:00:00.000Z";
+    const invalid = [
+      "You've hit your session limit · resets 2:10pm (America/Toronto)",
+      "{",
+      JSON.stringify({
+        is_error: true,
+        terminal_reason: "api_error",
+        api_error_status: "429",
+        result: "You've hit your session limit",
+      }),
+      JSON.stringify({
+        is_error: true,
+        terminal_reason: "api_error",
+        api_error_status: 429,
+        result: "You've hit your session limit · resets 2:10pm (Not/AZone)",
+      }),
+      JSON.stringify({
+        type: "turn.failed",
+        error: { message: "You've hit your session limit" },
+      }),
+    ];
+    for (const stdout of invalid) {
+      expect(parseClaudeSessionLimit(stdout, observedAt)).toBeNull();
+    }
+  });
+
   it("extracts Claude text, model, usage, cost, and session", () => {
     const parsed = parseProviderOutput(
       "claude",

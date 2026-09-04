@@ -6,10 +6,12 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { childEnvironment, runLane } from "./run.ts";
@@ -109,6 +111,10 @@ if (name === "grok" && args[0] === "models") {
 }
 const modelIndex = args.findIndex((value) => value === "--model");
 const model = modelIndex >= 0 ? args[modelIndex + 1] : "unknown";
+if (stage === "model" && process.env.FAKE_INVOCATION_LOG_PATH) {
+  const prompt = name === "grok" ? "" : await new Response(Bun.stdin.stream()).text();
+  writeFileSync(process.env.FAKE_INVOCATION_LOG_PATH, JSON.stringify({args, cwd: process.cwd(), prompt}));
+}
 if (process.env.FAKE_INVALID_MODEL === "1") {
   console.error("The requested model is not supported with this account.");
   process.exit(1);
@@ -130,6 +136,24 @@ if (stage === "model" && process.env.FAKE_SELF_SIGNAL) {
   await Bun.sleep(5_000);
 }
 if (name === "claude") {
+  if (process.env.FAKE_CLAUDE_PAUSE_EXIT !== undefined) {
+    console.log(JSON.stringify({
+      duration_api_ms: 65277,
+      session_id: "098e45a4-671d-4f4e-aaaa-51abd7fbc8a3",
+      total_cost_usd: 1.0764304999999998,
+      usage: {input_tokens:10,cache_creation_input_tokens:80240,cache_read_input_tokens:298407,output_tokens:4932},
+      modelUsage: {[model]: {inputTokens: 10}},
+      terminal_reason: process.env.FAKE_CLAUDE_PAUSE_REASON ?? "api_error",
+      is_error: process.env.FAKE_CLAUDE_PAUSE_ERROR === "false" ? false : true,
+      api_error_status: process.env.FAKE_CLAUDE_PAUSE_STATUS === "string" ? "429" : Number(process.env.FAKE_CLAUDE_PAUSE_STATUS ?? "429"),
+      result: process.env.FAKE_CLAUDE_PAUSE_RESULT ?? "You've hit your session limit · resets 2:10pm (America/Toronto)",
+      type: "result",
+    }));
+    if (process.env.FAKE_CLAUDE_PAUSE_WAIT_FOR_SIGNAL === "1") {
+      await Bun.sleep(5_000);
+    }
+    process.exit(Number(process.env.FAKE_CLAUDE_PAUSE_EXIT));
+  }
   console.log(JSON.stringify({result:"CLAUDE_OK",session_id:"c1",usage:{input_tokens:10,output_tokens:2},total_cost_usd:0.01,modelUsage:{[model]:{}}}));
 } else if (name === "codex") {
   console.log(JSON.stringify({type:"thread.started",thread_id:"o1"}));
@@ -169,11 +193,44 @@ function options(provider: Provider, suffix: string = provider): RunnerOptions {
     outputPath: join(scratch, `${suffix}.out`),
     receiptPath: join(scratch, `${suffix}.receipt.json`),
     timeoutMs: null,
+    managedAttempt: null,
   };
 }
 
 function receipt(path: string): RunnerReceipt {
   return JSON.parse(readFileSync(path, "utf8")) as RunnerReceipt;
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function managedOptions(
+  suffix: string = "managed-pause",
+  timeoutMs: number | null = null
+): RunnerOptions {
+  const input = { ...options("claude", suffix), timeoutMs };
+  const promptSha256 = sha256(readFileSync(input.promptPath, "utf8"));
+  const laneFingerprint = sha256(JSON.stringify({
+    parent: input.parent,
+    provider: input.provider,
+    model: input.model,
+    effort: input.effort,
+    mode: input.mode,
+    cwd: input.cwd,
+    promptPath: input.promptPath,
+    promptSha256,
+    timeoutMs: input.timeoutMs,
+  }));
+  return {
+    ...input,
+    managedAttempt: {
+      laneId: "manifest-review-claude",
+      attemptId: "manifest-review-claude.000001",
+      laneFingerprint,
+      promptSha256,
+    },
+  };
 }
 
 function runnerArgs(input: RunnerOptions): string[] {
@@ -191,6 +248,14 @@ function runnerArgs(input: RunnerOptions): string[] {
   ];
   if (input.timeoutMs !== null) {
     args.push("--timeout", String(input.timeoutMs / 1_000));
+  }
+  if (input.managedAttempt !== null) {
+    args.push(
+      "--lane-id", input.managedAttempt.laneId,
+      "--attempt-id", input.managedAttempt.attemptId,
+      "--lane-fingerprint", input.managedAttempt.laneFingerprint,
+      "--prompt-sha256", input.managedAttempt.promptSha256
+    );
   }
   return args;
 }
@@ -260,6 +325,13 @@ beforeEach(() => {
   delete process.env.FAKE_DESCENDANT_HOLDS_PIPES_MS;
   delete process.env.FAKE_DESCENDANT_PID_PATH;
   delete process.env.FAKE_SELF_SIGNAL;
+  delete process.env.FAKE_CLAUDE_PAUSE_EXIT;
+  delete process.env.FAKE_CLAUDE_PAUSE_REASON;
+  delete process.env.FAKE_CLAUDE_PAUSE_ERROR;
+  delete process.env.FAKE_CLAUDE_PAUSE_STATUS;
+  delete process.env.FAKE_CLAUDE_PAUSE_RESULT;
+  delete process.env.FAKE_INVOCATION_LOG_PATH;
+  delete process.env.FAKE_CLAUDE_PAUSE_WAIT_FOR_SIGNAL;
 });
 
 afterEach(() => {
@@ -285,10 +357,174 @@ afterEach(() => {
   delete process.env.FAKE_DESCENDANT_HOLDS_PIPES_MS;
   delete process.env.FAKE_DESCENDANT_PID_PATH;
   delete process.env.FAKE_SELF_SIGNAL;
+  delete process.env.FAKE_CLAUDE_PAUSE_EXIT;
+  delete process.env.FAKE_CLAUDE_PAUSE_REASON;
+  delete process.env.FAKE_CLAUDE_PAUSE_ERROR;
+  delete process.env.FAKE_CLAUDE_PAUSE_STATUS;
+  delete process.env.FAKE_CLAUDE_PAUSE_RESULT;
+  delete process.env.FAKE_INVOCATION_LOG_PATH;
+  delete process.env.FAKE_CLAUDE_PAUSE_WAIT_FOR_SIGNAL;
   rmSync(scratch, { recursive: true, force: true });
 });
 
 describe("runLane", () => {
+  for (const exit of [1, 0]) {
+    it(`records Claude's structured session limit when the child exits ${exit}`, async () => {
+      process.env.FAKE_CLAUDE_PAUSE_EXIT = String(exit);
+      const input = managedOptions(`managed-pause-${exit}`);
+
+      const result = await runLane(input);
+
+      expect(result.exitCode).toBe(75);
+      expect(existsSync(input.outputPath)).toBe(false);
+      expect(receipt(input.receiptPath)).toMatchObject({
+        schemaVersion: 2,
+        status: "provider-paused",
+        managedAttempt: {
+          ...input.managedAttempt,
+          verified: true,
+        },
+        providerPause: {
+          kind: "claude-session-limit",
+          terminalReason: "api_error",
+          apiStatus: 429,
+          message: "You've hit your session limit · resets 2:10pm (America/Toronto)",
+          resetEvidence: "You've hit your session limit · resets 2:10pm (America/Toronto)",
+        },
+        sessionId: "098e45a4-671d-4f4e-aaaa-51abd7fbc8a3",
+        usage: { inputTokens: 10, outputTokens: 4932 },
+        costUsd: 1.0764304999999998,
+        error: null,
+      });
+    });
+  }
+
+  it("does not treat malformed Claude 429 lookalikes as provider pauses", async () => {
+    const cases: Array<readonly [string, Record<string, string>]> = [
+      ["string status", { FAKE_CLAUDE_PAUSE_STATUS: "string" }],
+      ["wrong terminal reason", { FAKE_CLAUDE_PAUSE_REASON: "rate_limit" }],
+      ["unrelated result", { FAKE_CLAUDE_PAUSE_RESULT: "HTTP 429" }],
+      ["malformed reset", { FAKE_CLAUDE_PAUSE_RESULT: "You've hit your session limit · resets 25:61pm (America/Toronto)" }],
+    ];
+    for (const [label, overrides] of cases) {
+      process.env.FAKE_CLAUDE_PAUSE_EXIT = "1";
+      Object.assign(process.env, overrides);
+      const input = options("claude", `not-paused-${label}`);
+      const result = await runLane(input);
+      expect(result.exitCode).not.toBe(75);
+      expect(receipt(input.receiptPath).status).not.toBe("provider-paused");
+      delete process.env.FAKE_CLAUDE_PAUSE_STATUS;
+      delete process.env.FAKE_CLAUDE_PAUSE_REASON;
+      delete process.env.FAKE_CLAUDE_PAUSE_RESULT;
+    }
+  });
+
+  it("fails managed identity validation before Claude preflight", async () => {
+    const input = managedOptions("managed-bad-digest");
+    if (input.managedAttempt === null) throw new Error("managed test setup lost its claim");
+    const preflightStarted = join(scratch, "managed-bad-digest.preflight");
+    process.env.FAKE_PREFLIGHT_STARTED_PATH = preflightStarted;
+    const invalid: RunnerOptions = {
+      ...input,
+      managedAttempt: {
+        ...input.managedAttempt,
+        promptSha256: "0".repeat(64),
+      },
+    };
+
+    const result = await runLane(invalid);
+
+    expect(result.exitCode).toBe(70);
+    expect(existsSync(preflightStarted)).toBe(false);
+    expect(existsSync(invalid.outputPath)).toBe(false);
+    expect(receipt(invalid.receiptPath)).toMatchObject({
+      schemaVersion: 2,
+      status: "child-failed",
+      managedAttempt: {
+        ...invalid.managedAttempt,
+        verified: false,
+        reason: "prompt-digest-mismatch",
+      },
+    });
+  });
+
+  it("gives an explicit timeout precedence over a pending pause envelope", async () => {
+    process.env.FAKE_CLAUDE_PAUSE_EXIT = "1";
+    process.env.FAKE_MODEL_DELAY_MS = "250";
+    const input = managedOptions("managed-pause-timeout", 30);
+
+    const result = await runLane(input);
+
+    expect(result.exitCode).toBe(124);
+    expect(receipt(input.receiptPath)).toMatchObject({
+      status: "timed-out",
+      providerPause: null,
+    });
+  });
+
+  it("gives cancellation precedence over a received pause envelope", async () => {
+    const input = managedOptions("managed-pause-cancelled");
+    const runner = Bun.spawn([process.execPath, ...runnerArgs(input)], {
+      cwd: scratch,
+      env: {
+        ...process.env,
+        FAKE_CLAUDE_PAUSE_EXIT: "1",
+        FAKE_CLAUDE_PAUSE_WAIT_FOR_SIGNAL: "1",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const stdout = new Response(runner.stdout).text();
+    const stderr = new Response(runner.stderr).text();
+    await Bun.sleep(300);
+    runner.kill("SIGTERM");
+
+    expect(await exitWithin(runner, 3_000)).toBe(130);
+    await Promise.all([stdout, stderr]);
+    expect(receipt(input.receiptPath)).toMatchObject({
+      status: "cancelled",
+      providerPause: null,
+    });
+  });
+
+  it("binds a successful managed receipt to its verified claim", async () => {
+    const input = managedOptions("managed-complete");
+
+    const result = await runLane(input);
+
+    expect(result.exitCode).toBe(0);
+    expect(receipt(input.receiptPath)).toMatchObject({
+      schemaVersion: 2,
+      status: "complete",
+      managedAttempt: { ...input.managedAttempt, verified: true },
+      providerPause: null,
+      error: null,
+    });
+  });
+
+  it("passes the exact managed prompt and Claude route to the provider boundary", async () => {
+    const input = managedOptions("managed-boundary");
+    const invocationLog = join(scratch, "managed-boundary.json");
+    process.env.FAKE_INVOCATION_LOG_PATH = invocationLog;
+
+    expect((await runLane(input)).exitCode).toBe(0);
+
+    const invocation = JSON.parse(readFileSync(invocationLog, "utf8"));
+    expect(invocation.cwd).toBe(realpathSync(input.cwd));
+    expect(invocation.prompt).toBe("Return the marker.");
+    expect(invocation.args).toEqual(expect.arrayContaining([
+      "--model",
+      input.model,
+      "--effort",
+      input.effort,
+      "--permission-mode",
+      "plan",
+    ]));
+    expect(receipt(input.receiptPath)).toMatchObject({
+      managedAttempt: { ...input.managedAttempt, verified: true },
+    });
+  });
+
   for (const [parent, provider] of [
     ["claude", "codex"],
     ["claude", "grok"],

@@ -14,6 +14,7 @@ function options(overrides: Partial<RunnerOptions> = {}): RunnerOptions {
     outputPath: "/tmp/output.md",
     receiptPath: "/tmp/receipt.json",
     timeoutMs: null,
+    managedAttempt: null,
     ...overrides,
   };
 }

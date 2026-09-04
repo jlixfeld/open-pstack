@@ -1,4 +1,5 @@
 import type {
+  ClaudeSessionLimitPause,
   NormalizedUsage,
   ParsedOutput,
   Provider,
@@ -49,6 +50,78 @@ function modelFromUsage(value: unknown, requestedModel: string): string | null {
   return models.find((model) => reportedModelMatches(requestedModel, model))
     ?? models[0]
     ?? null;
+}
+
+function claudeEnvelope(stdout: string): JsonObject | null {
+  try {
+    return object(JSON.parse(stdout));
+  } catch {
+    return null;
+  }
+}
+
+function validSessionLimitMessage(message: string): boolean {
+  const match = /^You've hit your session limit(?: · resets (\d{1,2}):(\d{2})(am|pm) \(([^()]+)\))?$/.exec(message);
+  if (match === null) return false;
+  const [, hour, minute, meridiem, timeZone] = match;
+  if (hour === undefined) return true;
+  const hourValue = Number(hour);
+  if (
+    hourValue < 1 ||
+    hourValue > 12 ||
+    minute === undefined ||
+    Number(minute) > 59 ||
+    (meridiem !== "am" && meridiem !== "pm") ||
+    timeZone === undefined
+  ) {
+    return false;
+  }
+  try {
+    Intl.DateTimeFormat("en", { timeZone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function parseClaudeSessionLimit(
+  stdout: string,
+  observedAt: string
+): ClaudeSessionLimitPause | null {
+  const value = claudeEnvelope(stdout);
+  const result = typeof value?.result === "string" ? value.result.trim() : null;
+  if (
+    value === null ||
+    value.is_error !== true ||
+    value.terminal_reason !== "api_error" ||
+    value.api_error_status !== 429 ||
+    result === null ||
+    !validSessionLimitMessage(result)
+  ) {
+    return null;
+  }
+  return {
+    kind: "claude-session-limit",
+    terminalReason: "api_error",
+    apiStatus: 429,
+    observedAt,
+    message: result,
+    resetEvidence: result,
+  };
+}
+
+export function parseClaudePauseTelemetry(
+  stdout: string,
+  requestedModel: string
+): Omit<ParsedOutput, "text"> | null {
+  const value = claudeEnvelope(stdout);
+  if (value === null) return null;
+  return {
+    reportedModel: modelFromUsage(value.modelUsage, requestedModel),
+    sessionId: nullableString(value.session_id ?? value.sessionId),
+    usage: normalizedUsage(value.usage),
+    costUsd: finiteNumber(value.total_cost_usd) ?? null,
+  };
 }
 
 function parseClaude(stdout: string, requestedModel: string): ParsedOutput {

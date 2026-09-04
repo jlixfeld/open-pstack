@@ -35,6 +35,24 @@ describe("runner CLI parsing", () => {
     expect(parseArgs(argv(["--timeout", "5400"]))?.timeoutMs).toBe(5_400_000);
   });
 
+  it("accepts managed identity only as one complete group", () => {
+    const digest = "a".repeat(64);
+    expect(parseArgs(argv([
+      "--lane-id", "manifest-review-claude",
+      "--attempt-id", "manifest-review-claude.000001",
+      "--lane-fingerprint", digest,
+      "--prompt-sha256", digest,
+    ]))?.managedAttempt).toEqual({
+      laneId: "manifest-review-claude",
+      attemptId: "manifest-review-claude.000001",
+      laneFingerprint: digest,
+      promptSha256: digest,
+    });
+    expect(() => parseArgs(argv(["--lane-id", "manifest-review-claude"]))).toThrow(
+      "must be provided together"
+    );
+  });
+
   it("rejects a non-positive timeout", () => {
     expect(() => parseArgs(argv(["--timeout", "0"]))).toThrow(
       "greater than zero"
