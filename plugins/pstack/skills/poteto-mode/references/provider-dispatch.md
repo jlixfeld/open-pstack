@@ -92,8 +92,19 @@ pstack-runner \
   --cwd <repository or dedicated worktree> \
   --output <unique final-response file> \
   --receipt <unique receipt file> \
-  [--timeout <seconds>]
+  [--timeout <seconds>] \
+  [--lane-id <id> --attempt-id <id> --lane-fingerprint <sha256> --prompt-sha256 <sha256>]
 ```
+
+Managed orchestration supplies the final four flags as one all-or-none identity.
+The canonical lane fingerprint is the SHA-256 of `JSON.stringify` over this
+fixed-key object, with absolute `cwd` and `promptPath`: `parent`, `provider`,
+`model`, `effort`, `mode`, `cwd`, `promptPath`, `promptSha256`, `timeoutMs`.
+The runner is one-shot: it writes receipt schema v2, never sleeps or retries,
+and never substitutes a model or provider. Exit 75 and a schema-v2
+`provider-paused` receipt mean a Claude session-limit pause, neither success
+nor a dropout; the coordinator preserves the exact lane for its scheduled
+retry.
 
 Pass arguments as an argv array or quote every path. Never interpolate prompt text into a shell command. The launcher preflights the assigned CLI and authentication, invokes the model exactly once, disables recursive agents and ambient skill dispatch where the CLI supports it, restricts the built-in tool surface, and records the exact provider/model/effort flags. External lanes do not receive the parent's MCP surface. Keep MCP-dependent Why and Reflect roles on `inherit-parent` or `auto`. The launcher never falls back.
 
@@ -140,6 +151,6 @@ Success requires all of these:
 
 The receipt also carries elapsed time, token usage when the CLI exposes it, and cost when available. Keep it with the arena or review artifacts so parent-harness comparisons are evidence-based.
 
-Any missing CLI, failed login, unavailable model, explicit timeout, cancellation, catchable post-reservation launcher failure, non-zero child exit, malformed result, or model mismatch is a receipt-bearing dropout. Record it and apply the calling skill's existing dropout policy. A `cancelled` receipt proves that the runner received the signal; its `signal` field is non-null only when the runner sent that signal to a still-active direct CLI child, and remains null when cancellation only stopped a post-exit pipe drain. The provider CLI owns any processes it starts beneath that direct child; the receipt does not claim a process-tree kill. Do not delete or overwrite the receipt. Never substitute the parent model, retry another provider, or reinterpret an external descriptor as a native model slug.
+Any missing CLI, failed login, unavailable model, explicit timeout, cancellation, catchable post-reservation launcher failure, non-zero child exit, malformed result, or model mismatch is a receipt-bearing dropout. Record it and apply the calling skill's existing dropout policy. A schema-v2 managed `provider-paused` receipt (exit 75) is explicitly excluded: preserve it and let the orchestrate registry retry the same provider lane no sooner than its due time. A `cancelled` receipt proves that the runner received the signal; its `signal` field is non-null only when the runner sent that signal to a still-active direct CLI child, and remains null when cancellation only stopped a post-exit pipe drain. The provider CLI owns any processes it starts beneath that direct child; the receipt does not claim a process-tree kill. Do not delete or overwrite the receipt. Never substitute the parent model, retry another provider, or reinterpret an external descriptor as a native model slug.
 
 Start native and external lanes in the same fan-out phase, then wait for all of them before judging. A judge must not read candidate paths while their owners are still writing.

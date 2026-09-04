@@ -24,6 +24,14 @@ Depth stays at coordinator, track, worker. Author the track decomposition per pr
 
 Create `~/.claude/orchestrate/<project-slug>/`, outside the repo and outside the session. The store has to outlive this chat: the program runs for days, a session restart is expected (see Liveness and failure), and the store is the postmortem. The session scratchpad is not a candidate, however convenient; it is session-scoped and temporary, so a restart takes the program's only state with it. Every file has exactly one writer; owners publish facts, readers aggregate at read time. Use `bun skills/poteto-mode/scripts/orch/orch.ts` under the installed plugin for bookkeeping, written below as `orch`, while its canonical plain TSV and JSON stay readable without the CLI.
 
+#### Mandatory managed provider lanes
+
+Register a provider obligation before launching it: `orch lane register <lane-id> --unit <unit-id> --parent <parent> --provider <provider> --model <model> --effort <effort> --mode <mode> --prompt <path> --cwd <path>`. Registration snapshots the exact prompt under the durable store and binds it to one unit. Only registration accepts route fields. `orch --json lane tick` reconciles receipts and returns retained background launch plans as command-plus-argv; it does not spawn, wait, sleep, or substitute a provider. Retain the returned background handle in the parent harness.
+
+Claude provider pauses wake no sooner than 30 minutes after observation by default (`--interval-seconds` may only make an explicit registration policy). Duplicate wakes and session restarts replay the same unreserved plan; the runner reservation permits one provider child. Once any output or receipt reservation exists, automatic relaunch stops. A coordinator may release only a known-dead exact claim with `orch lane release <lane-id> --attempt <attempt-id> --reason <authoritative evidence>`, then use `orch --json lane retry <lane-id>` for a fresh attempt. There is no TTL or inferred timeout.
+
+Before changing a unit's state, `orch lane check --unit <unit-id>` must exit ready. It exits 3 while any bound lane is unstarted, paused, failed, interrupted, or has missing/tampered prompt, receipt, or output evidence. `orch unit set` enforces the same gate for state changes but allows a same-state metadata update.
+
 - `preferences.md` is the standing-orders register: numbered lines, one constraint each (model policy, stack shape and count, verification bar, forbidden paths, escalation policy). Paste it verbatim into every spawn and every resume; directives decay across resumes, and each dropped one costs a human turn. When you catch yourself restating an instruction, append the line before you act (principle-encode-lessons-in-structure).
 - `overview.md` is the durable PR and issue DB. Append; never rewrite wholesale per event.
 - `units.tsv` has one row per unit: id, track, state, branch, PR, head SHA, brief path. Update rows in place.

@@ -16,6 +16,12 @@ import {
   type Unit,
   type Verdict,
 } from "./store.ts";
+import {
+  ACCESS_MODES,
+  EFFORTS,
+  PARENTS,
+  PROVIDERS,
+} from "../runner/types.ts";
 
 ensureDependenciesInstalled();
 const {
@@ -79,6 +85,23 @@ interface GateResolveOptions {
   readonly answer: string;
 }
 
+interface LaneRegisterOptions {
+  readonly unit: string;
+  readonly parent: string;
+  readonly provider: string;
+  readonly model: string;
+  readonly effort: string;
+  readonly mode: string;
+  readonly prompt: string;
+  readonly cwd: string;
+  readonly intervalSeconds?: number;
+  readonly timeout?: number;
+}
+
+interface LaneReleaseOptions { readonly attempt: string; readonly reason: string; }
+
+class LaneBlockedError extends Error {}
+
 interface FrontierSetOptions {
   readonly repo?: string;
   readonly prs?: readonly number[];
@@ -94,6 +117,18 @@ function positiveInteger(value: string): number {
     throw new InvalidArgumentError("must be a positive integer");
   }
   return parsed;
+}
+
+function laneChoice<T extends string>(
+  value: string,
+  choices: readonly T[],
+  label: string
+): T {
+  const choice = choices.find((candidate) => candidate === value);
+  if (choice === undefined) {
+    throw new UsageError(`${label} must be one of: ${choices.join(", ")}`);
+  }
+  return choice;
 }
 
 function prList(value: string): readonly number[] {
@@ -295,6 +330,73 @@ function createProgram(io: Io): Command {
           }),
         unitLine
       )
+    );
+
+  const lane = program
+    .command("lane")
+    .description("manage mandatory provider lanes")
+    .action(() => requireSubcommand(program));
+  leaf(lane, "register <lane-id>", "register an immutable provider lane")
+    .requiredOption("--unit <unit-id>", "dependent unit")
+    .requiredOption("--parent <parent>", "parent harness")
+    .requiredOption("--provider <provider>", "assigned provider")
+    .requiredOption("--model <model>", "assigned model")
+    .requiredOption("--effort <effort>", "assigned effort")
+    .requiredOption("--mode <mode>", "access mode")
+    .requiredOption("--prompt <path>", "prompt file")
+    .requiredOption("--cwd <path>", "working directory")
+    .option("--interval-seconds <n>", "pause retry interval", positiveInteger)
+    .option("--timeout <seconds>", "explicit runner timeout", positiveInteger)
+    .action((laneId: string, options: LaneRegisterOptions) =>
+      runStore(
+        program,
+        io,
+        (store) => store.lanes.register({
+          laneId,
+          unitId: options.unit,
+          parent: laneChoice(options.parent, PARENTS, "parent"),
+          provider: laneChoice(options.provider, PROVIDERS, "provider"),
+          model: options.model,
+          effort: laneChoice(options.effort, EFFORTS, "effort"),
+          mode: laneChoice(options.mode, ACCESS_MODES, "mode"),
+          promptPath: options.prompt,
+          cwd: options.cwd,
+          intervalSeconds: options.intervalSeconds,
+          timeoutSeconds: options.timeout,
+        }),
+        (result) => `${result.spec.laneId}\tregistered`
+      )
+    );
+  leaf(lane, "tick", "reconcile and claim due provider lanes").action(() =>
+    runStore(
+      program,
+      io,
+      (store) => store.lanes.tick(),
+      (plans) => plans.map((plan) => `${plan.laneId}\t${plan.attemptId}`).join("\n") || "(no launch)",
+      (plans) => ({ plans })
+    )
+  );
+  leaf(lane, "check", "check mandatory lanes for a unit")
+    .requiredOption("--unit <unit-id>", "dependent unit")
+    .action((options: { readonly unit: string }) =>
+      runStore(
+        program,
+        io,
+        async (store) => {
+          if (!(await store.lanes.check(options.unit))) throw new LaneBlockedError();
+          return "READY";
+        },
+        String
+      )
+    );
+  leaf(lane, "retry <lane-id>", "explicitly retry an ordinary failed lane").action((laneId: string) =>
+    runStore(program, io, (store) => store.lanes.retry(laneId), (plan) => `${plan.laneId}\t${plan.attemptId}`, (plan) => plan)
+  );
+  leaf(lane, "release <lane-id>", "release a dead claimed attempt")
+    .requiredOption("--attempt <attempt-id>", "claimed attempt id")
+    .requiredOption("--reason <text>", "authoritative dead-process evidence")
+    .action((laneId: string, options: LaneReleaseOptions) =>
+      runStore(program, io, (store) => store.lanes.release({ laneId, attemptId: options.attempt, reason: options.reason }), (result) => `${result.spec.laneId}\tinterrupted`)
     );
   leaf(unit, "set <id>", "update a unit")
     .requiredOption("--state <state>", "unit state")
@@ -537,6 +639,10 @@ function createProgram(io: Io): Command {
 }
 
 function handleError(error: unknown, program: Command, io: Io): number {
+  if (error instanceof LaneBlockedError) {
+    io.stderr("BLOCKED\n");
+    return 3;
+  }
   if (error instanceof CommanderError) {
     return error.exitCode === 0 ? 0 : 1;
   }

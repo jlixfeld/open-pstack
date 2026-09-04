@@ -213,6 +213,26 @@ else
   note "ok: TypeScript schema-boundary guidance preserves inference and no-new-dependency rule"
 fi
 
+managed_lane_bad=""
+for required in 'provider-paused' 'Exit 75' 'canonical lane fingerprint' 'never sleeps or retries' 'never substitutes a model or provider'; do
+  if ! grep -Fq "$required" "$dispatch"; then
+    managed_lane_bad="${managed_lane_bad}provider dispatch lost managed-lane invariant: $required"$'\n'
+  fi
+done
+orchestrate="$plugin/skills/poteto-mode/playbooks/orchestrate.md"
+for required in 'orch lane register' 'orch --json lane tick' 'orch lane check --unit' 'orch --json lane retry' 'orch lane release' '30 minutes' 'Duplicate wakes and session restarts' 'There is no TTL or inferred timeout.'; do
+  if ! grep -Fq "$required" "$orchestrate"; then
+    managed_lane_bad="${managed_lane_bad}orchestrate lost managed-lane invariant: $required"$'\n'
+  fi
+done
+if [ -n "$managed_lane_bad" ]; then
+  note "FAIL: managed provider lane contract"
+  note "$managed_lane_bad"
+  fail=1
+else
+  note "ok: managed provider lane contract"
+fi
+
 if [ "${PSTACK_STATIC_ONLY:-0}" = "1" ]; then
   exit "$fail"
 fi

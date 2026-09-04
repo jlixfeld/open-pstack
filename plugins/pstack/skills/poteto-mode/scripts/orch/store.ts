@@ -13,6 +13,16 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import {
+  checkUnit,
+  register as registerLane,
+  release as releaseLane,
+  retry as retryLane,
+  tick as tickLanes,
+  type Lane,
+  type LaunchPlan,
+  type RegisterParams,
+} from "./lanes.ts";
 
 const UNIT_HEADER = "id\ttrack\tstate\tbranch\tpr\tsha\tbrief";
 const LEDGER_HEADER = "pr\tsha\tverdict\tevidence\tverifier\tts";
@@ -181,6 +191,13 @@ export interface OpenStoreOptions {
 }
 
 export interface Store {
+  readonly lanes: {
+    readonly register: (params: RegisterParams) => Promise<Lane>;
+    readonly tick: () => Promise<readonly LaunchPlan[]>;
+    readonly check: (unitId: string) => Promise<boolean>;
+    readonly retry: (laneId: string) => Promise<LaunchPlan>;
+    readonly release: (params: { readonly laneId: string; readonly attemptId: string; readonly reason: string }) => Promise<Lane>;
+  };
   readonly units: {
     readonly add: (params: AddUnitParams) => Promise<Unit>;
     readonly set: (params: SetUnitParams) => Promise<Unit>;
@@ -1241,6 +1258,18 @@ export function openStore(
   };
 
   return {
+    lanes: {
+      register: async (params) => {
+        await beginWrite();
+        const unit = (await readUnits(store)).find((row) => row.id === params.unitId);
+        if (unit === undefined) throw new NotFoundError(`unit ${params.unitId} not found`);
+        return registerLane(store, params);
+      },
+      tick: async () => { await beginWrite(); return tickLanes(store); },
+      check: async (unitId) => { await beginWrite(); return checkUnit(store, requiredCell(unitId, "unit id")); },
+      retry: async (laneId) => { await beginWrite(); return retryLane(store, requiredCell(laneId, "lane id")); },
+      release: async (params) => { await beginWrite(); return releaseLane(store, requiredCell(params.laneId, "lane id"), requiredCell(params.attemptId, "attempt id"), requiredLine(params.reason, "release reason")); },
+    },
     units: {
       add: async (params) => {
         await beginWrite();
@@ -1273,6 +1302,9 @@ export function openStore(
         const old = rows[index];
         if (index < 0 || old === undefined) {
           throw new NotFoundError(`unit ${id} not found`);
+        }
+        if (old.state !== state && !(await checkUnit(store, id))) {
+          throw new UserError(`unit ${id} is blocked by incomplete managed provider lanes`);
         }
         const row: Unit = {
           ...old,

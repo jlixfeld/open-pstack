@@ -4,6 +4,11 @@ This port applies the Cursor → Claude Code substitutions in skill bodies. Earl
 
 ## Unreleased — role-qualified tiered routing
 
+Managed provider lanes now persist immutable route and prompt snapshots in the
+orchestrate store. The registry has explicit registration, one-shot ticks,
+mandatory unit gates, durable Claude quota pauses with a 30-minute default,
+manual retry/release, receipt-v2 validation, and no provider substitution.
+
 The routing manifest now lists Fable, Sol, Terra, Luna, Grok, and Opus with family-specific efforts (`ultra` for Sol and Terra only), plus an ordered role registry. The initial map separates feature implementation from refactoring. Setup has executable prepare/commit seams: it renders a deterministic preview and final-map probe plan in memory, probes outside the setup code, rechecks baselines, atomically replaces only changed targets, verifies readback, and compensates both snapshots on failure. Panels preserve every lane; Arena's cross-judge is a pool. An explicit pstack request or confirmation of the disclosed model sheet is standing authorization for every selected native or external lane to receive its assigned source code and task context. Automatic SessionStart routing is not authorization by itself. There is no fallback.
 
 A read-only Cursor monitor compares the recorded Cursor commit with the current `cursor/plugins` default branch only under `pstack/`. The local command reports changed files and blob-backed overlap with fork-specific changes. A weekly, manually dispatchable workflow reconciles one tracking issue and never applies upstream changes. The documented backport process keeps Cursor changes separate from direct `port-upstream` updates.
