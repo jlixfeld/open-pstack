@@ -23,6 +23,7 @@ import {
   type LaunchPlan,
   type RegisterParams,
 } from "./lanes.ts";
+import { initializeLaneRegistry } from "./lane-registry.ts";
 import {
   NotFoundError,
   UserError,
@@ -43,6 +44,12 @@ export {
 const UNIT_HEADER = "id\ttrack\tstate\tbranch\tpr\tsha\tbrief";
 const LEDGER_HEADER = "pr\tsha\tverdict\tevidence\tverifier\tts";
 const LOCK_FILE = ".orch.lock";
+const LOCK_RECOVERY_FILE = ".orch.lock.recovery";
+
+export const TERMINAL_RECONCILIATION_STATES = [
+  "abandoned",
+  "zombie-reconciled",
+] as const;
 
 export type Verdict =
   | "live-ui-verified"
@@ -268,6 +275,20 @@ function unitIdSet(units: readonly Unit[]): ReadonlySet<string> {
   return result;
 }
 
+function isTerminalReconciliationState(state: string): boolean {
+  return TERMINAL_RECONCILIATION_STATES.some(
+    (candidate) => candidate === state
+  );
+}
+
+function terminalUnitIdSet(units: readonly Unit[]): ReadonlySet<string> {
+  return new Set(
+    units
+      .filter((unit) => isTerminalReconciliationState(unit.state))
+      .map((unit) => unit.id)
+  );
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -374,29 +395,74 @@ function holderIsDead(holder: string): boolean {
   }
 }
 
+async function writePidLock(path: string, pid: string): Promise<void> {
+  const handle = await open(path, "wx");
+  try {
+    await handle.writeFile(`${pid}\n`);
+  } catch (error) {
+    await handle.close();
+    await unlink(path).catch(() => undefined);
+    throw error;
+  }
+  await handle.close();
+}
+
+async function readLockHolder(path: string): Promise<string | null> {
+  try {
+    return (await readFile(path, "utf8")).trim() || "unknown";
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return null;
+    return "unknown";
+  }
+}
+
+async function releaseOwnedLock(path: string, pid: string): Promise<void> {
+  try {
+    if ((await readFile(path, "utf8")).trim() === pid) {
+      await unlink(path);
+    }
+  } catch (error) {
+    if (errorCode(error) !== "ENOENT") throw error;
+  }
+}
+
+async function acquireRecoveryLock(
+  store: string,
+  pid: string
+): Promise<() => Promise<void>> {
+  const path = join(store, LOCK_RECOVERY_FILE);
+  try {
+    await writePidLock(path, pid);
+  } catch (error) {
+    if (errorCode(error) !== "EEXIST") throw error;
+    const holder = (await readLockHolder(path)) ?? "unknown";
+    throw new UserError(`store lock recovery held by pid ${holder}`);
+  }
+  return () => releaseOwnedLock(path, pid);
+}
+
 async function acquireLock(
   store: string,
   options: OpenStoreOptions
 ): Promise<() => Promise<void>> {
   const path = join(store, LOCK_FILE);
   const pid = String(process.pid);
-  const create = async (): Promise<void> => {
-    const handle = await open(path, "wx");
-    await handle.writeFile(`${pid}\n`);
-    await handle.close();
+  const create = (): Promise<void> => writePidLock(path, pid);
+  const held = async (): Promise<never> => {
+    const holder = (await readLockHolder(path)) ?? "unknown";
+    throw new UserError(`store lock held by pid ${holder}`);
   };
-
-  const takeOver = async (): Promise<void> => {
-    await unlink(path);
+  const replace = async (): Promise<void> => {
+    try {
+      await unlink(path);
+    } catch (error) {
+      if (errorCode(error) !== "ENOENT") throw error;
+    }
     try {
       await create();
-    } catch (retryError) {
-      if (errorCode(retryError) === "EEXIST") {
-        const retryHolder =
-          (await readFile(path, "utf8")).trim() || "unknown";
-        throw new UserError(`store lock held by pid ${retryHolder}`);
-      }
-      throw retryError;
+    } catch (error) {
+      if (errorCode(error) === "EEXIST") return held();
+      throw error;
     }
   };
 
@@ -406,34 +472,31 @@ async function acquireLock(
     if (errorCode(error) !== "EEXIST") {
       throw error;
     }
-    let holder = "unknown";
+    const releaseRecovery = await acquireRecoveryLock(store, pid);
     try {
-      holder = (await readFile(path, "utf8")).trim() || "unknown";
-    } catch {
-      holder = "unknown";
-    }
-    if (holderIsDead(holder)) {
-      options.onStaleLock?.(holder);
-      await takeOver();
-    } else if (options.force) {
-      options.onLockStolen?.(holder);
-      await takeOver();
-    } else {
-      throw new UserError(`store lock held by pid ${holder}`);
+      const holder = await readLockHolder(path);
+      if (holder === null) {
+        try {
+          await create();
+        } catch (retryError) {
+          if (errorCode(retryError) === "EEXIST") await held();
+          throw retryError;
+        }
+      } else if (holderIsDead(holder)) {
+        options.onStaleLock?.(holder);
+        await replace();
+      } else if (options.force) {
+        options.onLockStolen?.(holder);
+        await replace();
+      } else {
+        throw new UserError(`store lock held by pid ${holder}`);
+      }
+    } finally {
+      await releaseRecovery();
     }
   }
 
-  return async (): Promise<void> => {
-    try {
-      if ((await readFile(path, "utf8")).trim() === pid) {
-        await unlink(path);
-      }
-    } catch (error) {
-      if (errorCode(error) !== "ENOENT") {
-        throw error;
-      }
-    }
-  };
+  return () => releaseOwnedLock(path, pid);
 }
 
 async function readTsv(
@@ -1243,19 +1306,23 @@ export function openStore(
         const units = await readUnits(store);
         const unit = units.find((row) => row.id === params.unitId);
         if (unit === undefined) throw new NotFoundError(`unit ${params.unitId} not found`);
+        const unitIds = unitIdSet(units);
         return registerLane(
           store,
           params,
-          unitIdSet(units),
+          unitIds,
+          terminalUnitIdSet(units),
           options.now
         );
       },
       tick: async () => {
         await beginWrite();
         const units = await readUnits(store);
+        const unitIds = unitIdSet(units);
         return tickLanes(
           store,
-          unitIdSet(units),
+          unitIds,
+          terminalUnitIdSet(units),
           options.now
         );
       },
@@ -1266,27 +1333,37 @@ export function openStore(
         if (!units.some((row) => row.id === id)) {
           throw new NotFoundError(`unit ${id} not found`);
         }
-        return checkUnit(store, id, unitIdSet(units));
+        const unitIds = unitIdSet(units);
+        return checkUnit(
+          store,
+          id,
+          unitIds,
+          terminalUnitIdSet(units)
+        );
       },
       retry: async (laneId) => {
         await beginWrite();
         const units = await readUnits(store);
+        const unitIds = unitIdSet(units);
         return retryLane(
           store,
           requiredCell(laneId, "lane id"),
-          unitIdSet(units),
+          unitIds,
+          terminalUnitIdSet(units),
           options.now
         );
       },
       release: async (params) => {
         await beginWrite();
         const units = await readUnits(store);
+        const unitIds = unitIdSet(units);
         return releaseLane(
           store,
           requiredCell(params.laneId, "lane id"),
           requiredCell(params.attemptId, "attempt id"),
           requiredLine(params.reason, "release reason"),
-          unitIdSet(units),
+          unitIds,
+          terminalUnitIdSet(units),
           options.now
         );
       },
@@ -1324,14 +1401,15 @@ export function openStore(
         if (index < 0 || old === undefined) {
           throw new NotFoundError(`unit ${id} not found`);
         }
-        const terminalReconciliation = state === "abandoned" || state === "zombie-reconciled";
+        const terminalReconciliation = isTerminalReconciliationState(state);
         if (
           old.state !== state &&
           !terminalReconciliation &&
           !(await checkUnit(
             store,
             id,
-            unitIdSet(rows)
+            unitIdSet(rows),
+            terminalUnitIdSet(rows)
           )).ready
         ) {
           throw new UserError(
@@ -1647,6 +1725,7 @@ export function openStore(
       await writeIfMissing(join(store, "gates.md"), "");
       await writeIfMissing(join(store, "preferences.md"), "");
       await writeIfMissing(join(store, "frontier.json"), "{}\n");
+      await initializeLaneRegistry(store);
       return { store };
     },
     close: async () => {

@@ -214,13 +214,32 @@ else
 fi
 
 managed_lane_bad=""
-for required in 'provider-paused' 'Exit 75' 'whether managed or unmanaged' 'canonical lane fingerprint' 'never sleeps or retries' 'never substitutes a model or provider'; do
+for required in \
+  'provider-paused' \
+  'Exit 75' \
+  'whether managed or unmanaged' \
+  'canonical lane fingerprint' \
+  'starts the model process at most once' \
+  'only sleep or retry is the bounded Grok authentication preflight' \
+  'Every managed ordinary or elevated retry uses the unchanged launch plan and fresh managed attempt identity returned by `orch --json lane retry`' \
+  'never substitutes a model or provider'; do
   if ! grep -Fq "$required" "$dispatch"; then
     managed_lane_bad="${managed_lane_bad}provider dispatch lost managed-lane invariant: $required"$'\n'
   fi
 done
 orchestrate="$plugin/skills/poteto-mode/playbooks/orchestrate.md"
-for required in 'orch lane register' 'orch --json lane tick' 'orch lane check --unit' 'orch --json lane retry' 'orch lane release' '30 minutes' 'never a shorter one' 'Duplicate wakes and session restarts' 'There is no TTL or inferred timeout.'; do
+for required in \
+  'orch lane register' \
+  'orch --json lane tick' \
+  'orch lane check --unit' \
+  'orch --json lane retry' \
+  'orch lane release' \
+  '30 minutes' \
+  'never a shorter one' \
+  'Duplicate wakes and session restarts' \
+  'There is no TTL or inferred timeout.' \
+  'Managed provider pauses are not ordinary `cap-hit` failures and do not count toward the two-retry policy below.' \
+  'Schedulers never pass the global `--force` option; forced lock theft is an operator recovery action.'; do
   if ! grep -Fq "$required" "$orchestrate"; then
     managed_lane_bad="${managed_lane_bad}orchestrate lost managed-lane invariant: $required"$'\n'
   fi

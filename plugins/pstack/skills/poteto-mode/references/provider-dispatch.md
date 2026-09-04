@@ -100,8 +100,7 @@ Managed orchestration supplies the final four flags as one all-or-none identity.
 The canonical lane fingerprint is the SHA-256 of `JSON.stringify` over this
 fixed-key object, with absolute `cwd` and `promptPath`: `parent`, `provider`,
 `model`, `effort`, `mode`, `cwd`, `promptPath`, `promptSha256`, `timeoutMs`.
-The runner is one-shot: it writes receipt schema v2, never sleeps or retries,
-and never substitutes a model or provider. Exit 75 and a schema-v2
+The runner is one-shot: it writes receipt schema v2 and never substitutes a model or provider. It starts the model process at most once and never retries model execution; its only sleep or retry is the bounded Grok authentication preflight described below. Exit 75 and a schema-v2
 `provider-paused` receipt mean a Claude session-limit pause, neither success
 nor a dropout. The runner classifies provider state independently of managed
 identity. A managed coordinator preserves the exact lane for its scheduled
@@ -114,6 +113,8 @@ Grok authentication preflight has one bounded retry. If the first `grok models` 
 
 The parent tool sandbox still governs whether a subscribed child CLI can reach its credentials and network. Run setup's live probe from the actual parent profile.
 
+Every managed ordinary or elevated retry uses the unchanged launch plan and fresh managed attempt identity returned by `orch --json lane retry`; never hand-invent attempt IDs or artifact paths. Reconcile the prior receipt through `orch --json lane tick` before asking for that retry plan, then execute the returned command and argv unchanged.
+
 Codex on macOS has one scoped exception. Claude Code stores a normal `claude auth login` session in the macOS Keychain, which the Codex sandbox can block even when the user is logged in. When a Codex parent launches a Claude lane, request one elevated attempt only when the sandboxed receipt contains all of these fields:
 
 - `parent: "codex"`
@@ -123,7 +124,7 @@ Codex on macOS has one scoped exception. Claude Code stores a normal `claude aut
 
 For a Claude preflight, this combination means that `claude auth status --json` returned a parseable JSON object with boolean `loggedIn: false`. The exit code does not change this classification. The runner classifies malformed JSON, a missing or nonboolean `loggedIn` field, and unrelated nonzero output as `child-failed`. Do not infer this condition from `preflight.evidence`.
 
-Only the macOS Keychain access requires privilege escalation; the provider payload is already authorized by the pstack dispatch. Phrase the approval rationale only as permission for the runner to read the existing Claude CLI session. Suggest a prefix rule that contains only the absolute `pstack-runner` executable path. Run the new attempt with `sandbox_permissions: "require_escalated"` on the parent tool call. Keep `--parent`, `--provider`, `--model`, `--effort`, `--mode`, `--prompt`, `--cwd`, and `--timeout` exactly the same as the first attempt. If the first attempt omitted `--timeout`, omit it again. Use fresh unique paths for `--output` and `--receipt`. The new paths must not exist. Preserve the first receipt alongside the new receipt and any successful output. Do not read, print, copy, or export the credential.
+Only the macOS Keychain access requires privilege escalation; the provider payload is already authorized by the pstack dispatch. Phrase the approval rationale only as permission for the runner to read the existing Claude CLI session. Suggest a prefix rule that contains only the absolute `pstack-runner` executable path. Run the new attempt with `sandbox_permissions: "require_escalated"` on the parent tool call. Keep `--parent`, `--provider`, `--model`, `--effort`, `--mode`, `--prompt`, `--cwd`, and `--timeout` exactly the same as the first attempt. If the first attempt omitted `--timeout`, omit it again. Use fresh unique paths for `--output` and `--receipt`. The new paths must not exist. For a managed lane, obtain that unchanged route, fresh identity, and fresh paths only by executing the complete retry plan returned by `orch --json lane retry`; do not change the returned plan. For an unmanaged lane, choose the fresh paths directly. Preserve the first receipt alongside the new receipt and any successful output. Do not read, print, copy, or export the credential.
 
 If the elevated preflight still reports unauthenticated, or if the privilege request is rejected, record a genuine dropout. Do not retry again or substitute a model.
 

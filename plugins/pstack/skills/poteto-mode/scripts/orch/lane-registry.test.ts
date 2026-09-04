@@ -7,6 +7,7 @@ import {
   laneArtifactPaths,
   laneSnapshotPath,
   parseLaneRegistry,
+  saveLaneRegistry,
 } from "./lane-registry.ts";
 import { openStore, type Store } from "./store.ts";
 
@@ -204,6 +205,32 @@ describe("provider lane registry parsing", () => {
     for (const [, mutate] of cases) {
       await rejectsWithoutMutation(directory, store, mutate(copy(registered)));
     }
+  });
+
+  it("rejects uppercase lane ids in an existing registry", async () => {
+    const { directory, registered } = await fixture();
+    const value = copy(registered);
+    const spec = value.lanes[0].spec;
+    spec.laneId = "Review";
+    spec.promptPath = laneSnapshotPath(directory, spec.laneId);
+    spec.laneFingerprint = laneFingerprint(spec, spec.promptSha256);
+
+    expect(() => parseLaneRegistry(value, directory, UNIT_IDS)).toThrow(
+      "laneId"
+    );
+  });
+
+  it("parses a registry before atomically replacing the durable copy", async () => {
+    const { directory, registered } = await fixture();
+    const path = join(directory, "provider-lanes", "registry.json");
+    const before = await readFile(path, "utf8");
+    const invalid = copy(registered);
+    invalid.lanes[0].attempts[0].registeredAt = "not-an-instant";
+
+    await expect(
+      saveLaneRegistry(directory, invalid, UNIT_IDS)
+    ).rejects.toThrow("invalid shape");
+    expect(await readFile(path, "utf8")).toBe(before);
   });
 
   it("rejects unresolved or escaping snapshot and artifact paths", async () => {

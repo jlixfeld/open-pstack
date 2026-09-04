@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import {
+  mkdir,
   mkdtemp,
   readFile,
+  readdir,
   rm,
   stat,
   writeFile,
@@ -11,6 +13,7 @@ import { join, resolve } from "node:path";
 import { parseArgs } from "../runner/cli.ts";
 import { invocationCommand, preflightCommand } from "../runner/commands.ts";
 import { buildReceipt } from "../runner/receipt.ts";
+import { runLane } from "../runner/run.ts";
 import type {
   FailureReceiptStatus,
   RunnerOptions,
@@ -21,6 +24,7 @@ import {
   type LaunchPlan,
   type RegisterParams,
 } from "./lanes.ts";
+import { parseLaneRegistry } from "./lane-registry.ts";
 import { openStore, type Store } from "./store.ts";
 
 const directories: string[] = [];
@@ -226,6 +230,15 @@ async function registry(directory: string): Promise<any> {
   );
 }
 
+async function expectRegistryRoundTrip(
+  directory: string,
+  unitIds: readonly string[] = ["unit"]
+): Promise<any> {
+  const value = await registry(directory);
+  expect(parseLaneRegistry(value, directory, new Set(unitIds))).toEqual(value);
+  return value;
+}
+
 afterEach(async () => {
   for (const store of stores.splice(0).reverse()) await store.close();
   for (const directory of directories.splice(0)) {
@@ -234,6 +247,27 @@ afterEach(async () => {
 });
 
 describe("managed provider lane registration", () => {
+  it("rejects a zero-byte prompt before creating a snapshot or obligation", async () => {
+    const { directory, store, prompt } = await fixture("");
+
+    await expect(store.lanes.register(registration(prompt))).rejects.toThrow(
+      "prompt must not be empty"
+    );
+
+    expect((await readdir(join(directory, "provider-lanes"))).sort()).toEqual([
+      "registry.json",
+    ]);
+    expect((await registry(directory)).lanes).toEqual([]);
+    expect(await store.lanes.check("unit")).toEqual({
+      unitId: "unit",
+      ready: true,
+      blockingLaneIds: [],
+    });
+    expect(await store.units.set({ id: "unit", state: "done" })).toMatchObject({
+      state: "done",
+    });
+  });
+
   it("snapshots exact bytes privately before returning the first launch plan", async () => {
     const bytes = Uint8Array.from([0xff, 0x00, 0x61, 0x0a]);
     const { directory, store, prompt } = await fixture(bytes);
@@ -317,6 +351,32 @@ describe("managed provider lane registration", () => {
     ).rejects.toThrow("must match");
   });
 
+  it("rejects uppercase lane ids without overwriting a lowercase snapshot", async () => {
+    const { directory, store, prompt } = await fixture("lowercase snapshot\n");
+    const lane = await store.lanes.register(registration(prompt, {
+      laneId: "review",
+    }));
+    const before = await readFile(lane.spec.promptPath);
+    await writeFile(prompt, "uppercase replacement\n");
+
+    await expect(
+      store.lanes.register(registration(prompt, { laneId: "Review" }))
+    ).rejects.toThrow("lowercase");
+    await expect(store.lanes.retry("Review")).rejects.toThrow("lowercase");
+    await expect(store.lanes.release({
+      laneId: "Review",
+      attemptId: "attempt",
+      reason: "retained pid 12 is dead",
+    })).rejects.toThrow("lowercase");
+
+    expect(await readFile(lane.spec.promptPath)).toEqual(before);
+    expect((await registry(directory)).lanes).toHaveLength(1);
+    expect((await readdir(join(directory, "provider-lanes"))).sort()).toEqual([
+      "registry.json",
+      "review",
+    ]);
+  });
+
   it("records an explicit configured retry interval and timeout in the exact argv", async () => {
     const { store, prompt } = await fixture();
     const lane = await store.lanes.register(registration(prompt, {
@@ -336,6 +396,59 @@ describe("managed provider lane registration", () => {
 });
 
 describe("managed provider lane scheduling", () => {
+  it("clamps claim, release, and retry transitions when the wall clock rolls back", async () => {
+    const { directory, store, prompt, setNow } = await fixture();
+    await store.lanes.register(registration(prompt));
+    await expectRegistryRoundTrip(directory);
+
+    setNow(START - 5_000);
+    const [claimed] = await store.lanes.tick();
+    if (claimed === undefined) throw new Error("missing claimed plan");
+    let value = await expectRegistryRoundTrip(directory);
+    expect(value.lanes[0].attempts.at(-1).claimedAt).toBe(
+      new Date(START).toISOString()
+    );
+
+    setNow(START - 10_000);
+    await store.lanes.release({
+      laneId: claimed.laneId,
+      attemptId: claimed.attemptId,
+      reason: "retained pid 12 is dead",
+    });
+    value = await expectRegistryRoundTrip(directory);
+    expect(value.lanes[0].attempts.at(-1).interruptedAt).toBe(
+      new Date(START).toISOString()
+    );
+
+    setNow(START - 15_000);
+    await store.lanes.retry(claimed.laneId);
+    value = await expectRegistryRoundTrip(directory);
+    expect(value.lanes[0].attempts.at(-1).claimedAt).toBe(
+      new Date(START).toISOString()
+    );
+  });
+
+  it("clamps an explicit retry to a runner failure transition after clock rollback", async () => {
+    const { directory, store, prompt, setNow } = await fixture();
+    await store.lanes.register(registration(prompt));
+    const [plan] = await store.lanes.tick();
+    if (plan === undefined) throw new Error("missing plan");
+    await finishFailure(plan);
+
+    setNow(START - 5_000);
+    expect(await store.lanes.tick()).toEqual([]);
+    let value = await expectRegistryRoundTrip(directory);
+    expect(value.lanes[0].attempts.at(-1).completedAt).toBe(
+      new Date(START + 5_000).toISOString()
+    );
+
+    await store.lanes.retry(plan.laneId);
+    value = await expectRegistryRoundTrip(directory);
+    expect(value.lanes[0].attempts.at(-1).claimedAt).toBe(
+      new Date(START + 5_000).toISOString()
+    );
+  });
+
   it("replays the same unreserved plan after restart", async () => {
     const { directory, store, prompt } = await fixture();
     await store.lanes.register(registration(prompt));
@@ -455,9 +568,139 @@ describe("managed provider lane scheduling", () => {
     setNow(START + 10_000 + 1_800_000);
     expect((await store.lanes.tick())[0]?.laneId).toBe("probe");
   });
+
+  it("skips registered lanes on terminal reconciliation units without clearing their gates", async () => {
+    for (const state of ["abandoned", "zombie-reconciled"] as const) {
+      const { directory, store, prompt } = await fixture();
+      await store.lanes.register(registration(prompt));
+      await store.units.set({ id: "unit", state });
+
+      expect(await store.lanes.tick()).toEqual([]);
+      expect((await registry(directory)).lanes[0].attempts.at(-1).kind).toBe(
+        "registered"
+      );
+      expect(await store.lanes.check("unit")).toEqual({
+        unitId: "unit",
+        ready: false,
+        blockingLaneIds: ["claude-review"],
+      });
+      await expect(
+        store.units.set({ id: "unit", state: "done" })
+      ).rejects.toThrow("incomplete managed provider lanes");
+    }
+  });
+
+  it("lets a live sibling bypass a due pause owned by a terminal unit", async () => {
+    const { directory, store, prompt, setNow } = await fixture();
+    await store.lanes.register(registration(prompt, { laneId: "dead-pause" }));
+    const [first] = await store.lanes.tick();
+    if (first === undefined) throw new Error("missing first plan");
+    await finishPause(first);
+    setNow(START + 5_000);
+    await store.lanes.tick();
+    await store.units.set({ id: "unit", state: "abandoned" });
+
+    await store.units.add({ id: "live-unit", track: "test" });
+    await store.lanes.register(registration(prompt, {
+      laneId: "live-review",
+      unitId: "live-unit",
+    }));
+    setNow(START + 5_000 + 1_800_000);
+
+    const [plan] = await store.lanes.tick();
+    expect(plan?.laneId).toBe("live-review");
+    const value = await registry(directory);
+    expect(value.lanes.find((lane: any) => lane.spec.laneId === "dead-pause")
+      .attempts.at(-1).kind).toBe("provider-paused");
+    expect(value.lanes.find((lane: any) => lane.spec.laneId === "live-review")
+      .attempts.at(-1).kind).toBe("claimed");
+  });
+
+  it("keeps a terminal unit's claimed child provider-occupying", async () => {
+    const { directory, store, prompt } = await fixture();
+    await store.lanes.register(registration(prompt, { laneId: "dead-claim" }));
+    const [claimed] = await store.lanes.tick();
+    if (claimed === undefined) throw new Error("missing claimed plan");
+    await store.units.set({ id: "unit", state: "zombie-reconciled" });
+    await store.units.add({ id: "live-unit", track: "test" });
+    await store.lanes.register(registration(prompt, {
+      laneId: "live-review",
+      unitId: "live-unit",
+    }));
+
+    expect(await store.lanes.tick()).toEqual([]);
+    const value = await registry(directory);
+    expect(value.lanes.find((lane: any) => lane.spec.laneId === "dead-claim")
+      .attempts.at(-1).kind).toBe("claimed");
+    expect(value.lanes.find((lane: any) => lane.spec.laneId === "live-review")
+      .attempts.at(-1).kind).toBe("registered");
+  });
+
+  it("refuses to replay a claim after its immutable prompt or cwd is lost", async () => {
+    for (const corruption of [
+      "missing-prompt",
+      "changed-prompt",
+      "empty-prompt",
+      "missing-cwd",
+      "file-cwd",
+    ] as const) {
+      const { directory, store, prompt } = await fixture();
+      const cwd = join(directory, `cwd-${corruption}`);
+      await mkdir(cwd);
+      const lane = await store.lanes.register(registration(prompt, { cwd }));
+      const [plan] = await store.lanes.tick();
+      if (plan === undefined) throw new Error(`missing plan for ${corruption}`);
+
+      if (corruption === "missing-prompt") {
+        await rm(lane.spec.promptPath);
+      } else if (corruption === "changed-prompt") {
+        await writeFile(lane.spec.promptPath, "changed\n");
+      } else if (corruption === "empty-prompt") {
+        await writeFile(lane.spec.promptPath, "");
+      } else if (corruption === "missing-cwd") {
+        await rm(cwd, { recursive: true });
+      } else {
+        await rm(cwd, { recursive: true });
+        await writeFile(cwd, "not a directory\n");
+      }
+
+      if (
+        corruption === "missing-prompt" ||
+        corruption === "missing-cwd" ||
+        corruption === "file-cwd"
+      ) {
+        await expect(runLane(runnerOptions(plan))).rejects.toThrow();
+      }
+
+      expect(await stat(plan.outputPath).catch(() => null)).toBeNull();
+      expect(await stat(plan.receiptPath).catch(() => null)).toBeNull();
+      await expect(store.lanes.tick()).rejects.toThrow(`lane ${lane.spec.laneId}`);
+      await expect(store.lanes.tick()).rejects.toThrow(`lane ${lane.spec.laneId}`);
+      expect((await registry(directory)).lanes[0].attempts.at(-1).kind).toBe(
+        "claimed"
+      );
+    }
+  });
 });
 
 describe("managed provider lane outcomes and gates", () => {
+  it("refuses explicit retry for registered and complete lanes", async () => {
+    const { store, prompt, setNow } = await fixture();
+    await store.lanes.register(registration(prompt));
+    await expect(store.lanes.retry("claude-review")).rejects.toThrow(
+      "not eligible"
+    );
+
+    const [plan] = await store.lanes.tick();
+    if (plan === undefined) throw new Error("missing plan");
+    await finishComplete(plan);
+    setNow(START + 5_000);
+    await store.lanes.tick();
+    await expect(store.lanes.retry("claude-review")).rejects.toThrow(
+      "not eligible"
+    );
+  });
+
   it("runs pause to due retry to continuously validated completion", async () => {
     const { store, prompt, setNow } = await fixture();
     await store.lanes.register(registration(prompt));

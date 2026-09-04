@@ -192,6 +192,11 @@ describe("Store", () => {
       join(directory, "ledger.tsv"),
       "utf8"
     );
+    const firstRegistry = await readFile(
+      join(directory, "provider-lanes", "registry.json"),
+      "utf8"
+    );
+    expect(JSON.parse(firstRegistry)).toEqual({ schemaVersion: 1, lanes: [] });
 
     expect(await store.init()).toEqual({ store: directory });
     expect(await readFile(join(directory, "units.tsv"), "utf8")).toBe(
@@ -200,6 +205,9 @@ describe("Store", () => {
     expect(await readFile(join(directory, "ledger.tsv"), "utf8")).toBe(
       firstLedger
     );
+    expect(
+      await readFile(join(directory, "provider-lanes", "registry.json"), "utf8")
+    ).toBe(firstRegistry);
     expect((await readdir(directory)).sort()).toEqual([
       ".orch.lock",
       "frontier.json",
@@ -207,6 +215,7 @@ describe("Store", () => {
       "inbox",
       "ledger.tsv",
       "preferences.md",
+      "provider-lanes",
       "units.tsv",
     ]);
 
@@ -349,6 +358,84 @@ describe("Store", () => {
     expect(stale).toEqual([String(exited.pid)]);
     await recovered.close();
     expect(await readdir(directory)).not.toContain(".orch.lock");
+  });
+
+  it("serializes simultaneous stale-lock recovery into one durable lane claim", async () => {
+    const { directory, store } = await initializedStore();
+    await store.units.add({ id: "unit", track: "test" });
+    const prompt = join(directory, "prompt.md");
+    await writeFile(prompt, "review\n");
+    await store.lanes.register({
+      laneId: "review",
+      unitId: "unit",
+      parent: "codex",
+      provider: "claude",
+      model: "claude-opus-5",
+      effort: "xhigh",
+      mode: "read-only",
+      promptPath: prompt,
+      cwd: "/tmp",
+    });
+    await store.close();
+
+    const exited = Bun.spawn(["true"]);
+    await exited.exited;
+    await writeFile(join(directory, ".orch.lock"), `${exited.pid}\n`);
+    const barrier = join(directory, "tick-start");
+    const command = [
+      process.execPath,
+      SCRIPT,
+      "--store",
+      directory,
+      "--json",
+      "lane",
+      "tick",
+    ];
+    const children = Array.from({ length: 48 }, () =>
+      Bun.spawn(
+        [
+          "/bin/sh",
+          "-c",
+          'while [ ! -e "$1" ]; do :; done; shift; exec "$@"',
+          "orch-tick",
+          barrier,
+          ...command,
+        ],
+        { stdout: "pipe", stderr: "pipe" }
+      )
+    );
+    const results = children.map(async (child) => {
+      const stdout = new Response(child.stdout).text();
+      const stderr = new Response(child.stderr).text();
+      return {
+        code: await child.exited,
+        stdout: await stdout,
+        stderr: await stderr,
+      };
+    });
+    await writeFile(barrier, "go\n");
+
+    const settled = await Promise.all(results);
+    const successful = settled.filter((result) => result.code === 0);
+    expect(successful.length).toBeGreaterThan(0);
+    const attemptIds = successful.flatMap((result) =>
+      JSON.parse(result.stdout).plans.map(
+        (plan: { readonly attemptId: string }) => plan.attemptId
+      )
+    );
+    expect(attemptIds).toHaveLength(successful.length);
+    expect(new Set(attemptIds).size).toBe(1);
+
+    const durable = JSON.parse(
+      await readFile(join(directory, "provider-lanes", "registry.json"), "utf8")
+    );
+    expect(
+      durable.lanes[0].attempts.filter(
+        (attempt: { readonly kind: string }) => attempt.kind === "claimed"
+      )
+    ).toHaveLength(1);
+    expect((await readdir(directory))).not.toContain(".orch.lock");
+    expect((await readdir(directory))).not.toContain(".orch.lock.recovery");
   });
 
   it("blocks a writer and steals the pid lock only with force", async () => {
@@ -530,6 +617,38 @@ describe("Store", () => {
     );
   });
 
+  it("treats a missing lane registry as corruption and preserves obligations", async () => {
+    const { directory, store } = await initializedStore();
+    await store.units.add({ id: "unit", track: "test" });
+    const prompt = join(directory, "prompt.md");
+    await writeFile(prompt, "review\n");
+    await store.lanes.register({
+      laneId: "review",
+      unitId: "unit",
+      parent: "codex",
+      provider: "claude",
+      model: "claude-opus-5",
+      effort: "xhigh",
+      mode: "read-only",
+      promptPath: prompt,
+      cwd: "/tmp",
+    });
+    const registryPath = join(directory, "provider-lanes", "registry.json");
+    await rm(registryPath);
+
+    await expect(store.lanes.check("unit")).rejects.toThrow(
+      "provider lane registry is missing"
+    );
+    await expect(
+      store.units.set({ id: "unit", state: "done" })
+    ).rejects.toThrow("provider lane registry is missing");
+    expect((await store.units.get("unit")).state).toBe("pending");
+    await expect(store.init()).rejects.toThrow("orphaned provider lane artifacts");
+    expect(await readdir(join(directory, "provider-lanes", "review"))).toContain(
+      "prompt.md"
+    );
+  });
+
   it("rejects operations after close", async () => {
     const { store } = await initializedStore();
     await store.close();
@@ -588,6 +707,12 @@ describe("orch CLI", () => {
       "unit", "add", "unit",
       "--track", "test",
     ]).code).toBe(0);
+
+    expect(runCli([
+      "--store", directory,
+      "lane", "check",
+      "--unit", "unit",
+    ])).toEqual({ code: 0, stdout: "READY\n", stderr: "" });
 
     const registered = runCli([
       "--store", directory,

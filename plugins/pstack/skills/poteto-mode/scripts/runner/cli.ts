@@ -15,6 +15,7 @@ import {
 import {
   validateRunnerRoute,
   validateSafeId,
+  validateSafeLaneId,
   validateSha256,
 } from "./validation.ts";
 
@@ -90,7 +91,7 @@ function managedAttempt(values: {
     );
   }
   return {
-    laneId: validateSafeId(required("lane-id", entries[0][1]), "lane-id"),
+    laneId: validateSafeLaneId(required("lane-id", entries[0][1]), "lane-id"),
     attemptId: validateSafeId(required("attempt-id", entries[1][1]), "attempt-id"),
     laneFingerprint: sha256("lane-fingerprint", required("lane-fingerprint", entries[2][1])),
     promptSha256: sha256("prompt-sha256", required("prompt-sha256", entries[3][1])),

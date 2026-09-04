@@ -57,6 +57,12 @@ describe("runner CLI parsing", () => {
       "--lane-fingerprint", digest,
       "--prompt-sha256", digest,
     ]))).toThrow("lane-id must match");
+    expect(() => parseArgs(argv([
+      "--lane-id", "Review",
+      "--attempt-id", "attempt",
+      "--lane-fingerprint", digest,
+      "--prompt-sha256", digest,
+    ]))).toThrow("must be lowercase");
   });
 
   it("normalizes every path before managed identity is checked", () => {

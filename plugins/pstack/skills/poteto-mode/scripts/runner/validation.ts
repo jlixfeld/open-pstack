@@ -3,6 +3,7 @@ import type { Effort, RunnerOptions } from "./types.ts";
 import { MODEL_EFFORTS, UsageError } from "./types.ts";
 
 export const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+export const SAFE_LANE_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 export const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
 type RunnerRoute = Pick<
@@ -22,6 +23,15 @@ export function validateSafeId(value: string, label: string): string {
   if (!SAFE_ID_PATTERN.test(value)) {
     throw new UsageError(
       `${label} must match ${SAFE_ID_PATTERN.source}`
+    );
+  }
+  return value;
+}
+
+export function validateSafeLaneId(value: string, label: string): string {
+  if (!SAFE_LANE_ID_PATTERN.test(value)) {
+    throw new UsageError(
+      `${label} must match ${SAFE_LANE_ID_PATTERN.source} and must be lowercase`
     );
   }
   return value;
@@ -109,7 +119,7 @@ export function validateRunnerOptions(options: RunnerOptions): void {
 
   const managed = options.managedAttempt;
   if (managed !== null) {
-    validateSafeId(managed.laneId, "lane-id");
+    validateSafeLaneId(managed.laneId, "lane-id");
     validateSafeId(managed.attemptId, "attempt-id");
     validateSha256(managed.laneFingerprint, "lane-fingerprint");
     validateSha256(managed.promptSha256, "prompt-sha256");

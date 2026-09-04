@@ -1,5 +1,6 @@
 import {
   readFile,
+  readdir,
 } from "node:fs/promises";
 import {
   isAbsolute,
@@ -20,11 +21,13 @@ import {
 } from "../runner/types.ts";
 import {
   SAFE_ID_PATTERN,
+  SAFE_LANE_ID_PATTERN,
   SHA256_PATTERN,
   validateRunnerRoute,
 } from "../runner/validation.ts";
 import { UserError } from "./errors.ts";
 import {
+  errorCode,
   pathExists,
   writeFileAtomically,
 } from "./filesystem.ts";
@@ -135,6 +138,8 @@ const CLAIM_KEYS = [
   "receiptPath",
 ] as const;
 
+const NO_TERMINAL_UNITS: ReadonlySet<string> = new Set();
+
 function isRecord(value: unknown): value is JsonRecord {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -166,6 +171,11 @@ function string(value: unknown, label: string): string {
 function safeId(value: unknown, label: string): string {
   const result = string(value, label);
   return SAFE_ID_PATTERN.test(result) ? result : invalid(label);
+}
+
+function safeLaneId(value: unknown, label: string): string {
+  const result = string(value, label);
+  return SAFE_LANE_ID_PATTERN.test(result) ? result : invalid(label);
 }
 
 function digest(value: unknown, label: string): string {
@@ -244,7 +254,7 @@ export function laneRegistryPath(store: string): string {
 
 function parseSpec(value: unknown, store: string): LaneSpec {
   if (!isRecord(value) || !exactKeys(value, SPEC_KEYS)) invalid("lane spec");
-  const laneId = safeId(value.laneId, "laneId");
+  const laneId = safeLaneId(value.laneId, "laneId");
   const unitId = safeId(value.unitId, "unitId");
   const parent = choice(value.parent, PARENTS, "parent");
   const provider = choice(value.provider, PROVIDERS, "provider");
@@ -506,7 +516,8 @@ function parseAttempts(
 export function parseLaneRegistry(
   value: unknown,
   store: string,
-  unitIds: ReadonlySet<string>
+  unitIds: ReadonlySet<string>,
+  terminalUnitIds: ReadonlySet<string> = NO_TERMINAL_UNITS
 ): LaneRegistry {
   if (
     !isRecord(value) ||
@@ -537,7 +548,10 @@ export function parseLaneRegistry(
     );
     const current = attempts.at(-1);
     if (current === undefined) invalid("attempt history");
-    if (current.kind === "claimed" || current.kind === "provider-paused") {
+    if (
+      current.kind === "claimed" ||
+      (current.kind === "provider-paused" && !terminalUnitIds.has(spec.unitId))
+    ) {
       if (activeProviders.has(spec.provider)) invalid("multiple active lanes for provider");
       activeProviders.add(spec.provider);
     }
@@ -556,26 +570,62 @@ export async function writePrivateAtomic(
 
 export async function loadLaneRegistry(
   store: string,
-  unitIds: ReadonlySet<string>
+  unitIds: ReadonlySet<string>,
+  terminalUnitIds: ReadonlySet<string> = NO_TERMINAL_UNITS
 ): Promise<LaneRegistry> {
   const path = laneRegistryPath(store);
-  if (!(await pathExists(path))) return { schemaVersion: 1, lanes: [] };
+  if (!(await pathExists(path))) {
+    throw new UserError(
+      "provider lane registry is missing; the orchestrate store is corrupt"
+    );
+  }
   let value: unknown;
   try {
     value = JSON.parse(await readFile(path, "utf8"));
   } catch {
     throw new UserError("provider lane registry is not valid JSON");
   }
-  return parseLaneRegistry(value, store, unitIds);
+  return parseLaneRegistry(value, store, unitIds, terminalUnitIds);
 }
 
 export async function saveLaneRegistry(
   store: string,
-  registry: LaneRegistry
+  registry: LaneRegistry,
+  unitIds: ReadonlySet<string>,
+  terminalUnitIds: ReadonlySet<string> = NO_TERMINAL_UNITS
 ): Promise<void> {
+  const parsed = parseLaneRegistry(
+    registry,
+    store,
+    unitIds,
+    terminalUnitIds
+  );
   await writePrivateAtomic(
     laneRegistryPath(store),
-    `${JSON.stringify(registry, null, 2)}\n`
+    `${JSON.stringify(parsed, null, 2)}\n`
+  );
+}
+
+export async function initializeLaneRegistry(store: string): Promise<void> {
+  const path = laneRegistryPath(store);
+  if (await pathExists(path)) return;
+
+  const root = providerLanesRoot(store);
+  let entries: readonly string[] = [];
+  try {
+    entries = await readdir(root);
+  } catch (error) {
+    if (errorCode(error) !== "ENOENT") throw error;
+  }
+  if (entries.length > 0) {
+    throw new UserError(
+      "provider lane registry is missing with orphaned provider lane artifacts"
+    );
+  }
+  await saveLaneRegistry(
+    store,
+    { schemaVersion: 1, lanes: [] },
+    new Set()
   );
 }
 

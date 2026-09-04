@@ -30,6 +30,7 @@ import type {
 } from "./types.ts";
 import {
   SAFE_ID_PATTERN,
+  SAFE_LANE_ID_PATTERN,
   SHA256_PATTERN,
   validateRunnerRoute,
 } from "./validation.ts";
@@ -369,7 +370,7 @@ function managedAttempt(
     attemptId === null ||
     laneFingerprint === null ||
     promptSha256 === null ||
-    !SAFE_ID_PATTERN.test(laneId) ||
+    !SAFE_LANE_ID_PATTERN.test(laneId) ||
     !SAFE_ID_PATTERN.test(attemptId) ||
     !SHA256_PATTERN.test(laneFingerprint) ||
     !SHA256_PATTERN.test(promptSha256)

@@ -213,6 +213,32 @@ describe("runner receipt parsing", () => {
     }
   });
 
+  it("rejects an otherwise consistent receipt with an uppercase managed lane id", () => {
+    const input = options("claude");
+    if (input.managedAttempt === null) throw new Error("missing managed attempt");
+    const managedAttempt = { ...input.managedAttempt, laneId: "Review" };
+    const uppercase: RunnerOptions = {
+      ...input,
+      managedAttempt,
+    };
+    const value = buildReceipt(uppercase, {
+      ...processDetails(uppercase),
+      status: "complete",
+      modelProof: {
+        provider: "claude",
+        reportedModel: "claude-opus-5-20260901",
+        modelVerified: true,
+        modelEvidence: "provider-report",
+      },
+      managedAttempt: { ...managedAttempt, verified: true },
+      sessionId: "session-1",
+      usage: { inputTokens: 10 },
+      costUsd: 0.25,
+    });
+
+    expect(parseRunnerReceipt(value)).toBeNull();
+  });
+
   it("requires exact provider-specific completion proof", () => {
     const claude = completeReceipt("claude");
     const codex = completeReceipt("codex");

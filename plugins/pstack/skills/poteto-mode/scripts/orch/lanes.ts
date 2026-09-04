@@ -16,6 +16,7 @@ import {
 } from "../runner/types.ts";
 import {
   SAFE_ID_PATTERN,
+  SAFE_LANE_ID_PATTERN,
   validateExistingDirectory,
   validateRunnerRoute,
 } from "../runner/validation.ts";
@@ -86,6 +87,7 @@ export interface LaneCheck {
 export type LaneClock = () => number;
 
 const systemClock: LaneClock = () => Date.now();
+const NO_TERMINAL_UNITS: ReadonlySet<string> = new Set();
 
 function nowIso(clock: LaneClock): string {
   return new Date(clock()).toISOString();
@@ -94,6 +96,15 @@ function nowIso(clock: LaneClock): string {
 function safeId(value: string, label: string): string {
   if (!SAFE_ID_PATTERN.test(value)) {
     throw new UserError(`${label} must match ${SAFE_ID_PATTERN.source}`);
+  }
+  return value;
+}
+
+function safeLaneId(value: string): string {
+  if (!SAFE_LANE_ID_PATTERN.test(value)) {
+    throw new UserError(
+      `lane id must match ${SAFE_LANE_ID_PATTERN.source} and must be lowercase`
+    );
   }
   return value;
 }
@@ -164,6 +175,60 @@ async function readPrompt(path: string): Promise<Uint8Array> {
   }
 }
 
+async function validateLaunchInputs(spec: LaneSpec): Promise<void> {
+  let prompt: Uint8Array;
+  try {
+    const details = await stat(spec.promptPath);
+    if (!details.isFile()) throw new Error("not a file");
+    prompt = await readFile(spec.promptPath);
+  } catch {
+    throw new UserError(
+      `lane ${spec.laneId} immutable prompt snapshot is missing or unreadable`
+    );
+  }
+  if (prompt.byteLength === 0) {
+    throw new UserError(
+      `lane ${spec.laneId} immutable prompt snapshot is empty`
+    );
+  }
+  if (hashBytes(prompt) !== spec.promptSha256) {
+    throw new UserError(
+      `lane ${spec.laneId} immutable prompt snapshot has changed`
+    );
+  }
+  try {
+    if (!(await stat(spec.cwd)).isDirectory()) throw new Error("not a directory");
+  } catch {
+    throw new UserError(
+      `lane ${spec.laneId} working directory is missing or is not a directory`
+    );
+  }
+}
+
+function monotonicTransitionTime(lane: Lane, clock: LaneClock): string {
+  const current = latestAttempt(lane);
+  let floor: number;
+  switch (current.kind) {
+    case "registered":
+      floor = Date.parse(current.registeredAt);
+      break;
+    case "claimed":
+      floor = Date.parse(current.claimedAt);
+      break;
+    case "complete":
+    case "failed":
+      floor = Date.parse(current.completedAt);
+      break;
+    case "provider-paused":
+      floor = Date.parse(current.nextAttemptAt);
+      break;
+    case "interrupted":
+      floor = Date.parse(current.interruptedAt);
+      break;
+  }
+  return new Date(Math.max(clock(), floor)).toISOString();
+}
+
 function attemptPlan(spec: LaneSpec, attempt: ClaimedAttempt): LaunchPlan {
   const command = resolve(import.meta.dir, "..", "runner", "pstack-runner");
   const argv = [
@@ -213,13 +278,14 @@ async function claimLane(
   lane: Lane,
   clock: LaneClock
 ): Promise<{ readonly lane: Lane; readonly plan: LaunchPlan }> {
+  await validateLaunchInputs(lane.spec);
   const attemptId = randomUUID();
   const paths = laneArtifactPaths(store, lane.spec.laneId, attemptId);
   await mkdir(dirname(paths.outputPath), { recursive: true });
   const attempt: ClaimedAttempt = {
     kind: "claimed",
     attemptId,
-    claimedAt: nowIso(clock),
+    claimedAt: monotonicTransitionTime(lane, clock),
     ...paths,
   };
   const claimed = appendAttempt(lane, attempt);
@@ -338,12 +404,17 @@ interface ProviderOccupancy {
 
 function providerBarrier(
   registry: LaneRegistry,
-  provider: Provider
+  provider: Provider,
+  terminalUnitIds: ReadonlySet<string>
 ): ProviderOccupancy | null {
   for (const lane of registry.lanes) {
     if (lane.spec.provider !== provider) continue;
     const current = latestAttempt(lane);
-    if (current.kind === "claimed" || current.kind === "provider-paused") {
+    if (
+      current.kind === "claimed" ||
+      (current.kind === "provider-paused" &&
+        !terminalUnitIds.has(lane.spec.unitId))
+    ) {
       return { lane, attempt: current };
     }
   }
@@ -390,9 +461,10 @@ export async function register(
   store: string,
   params: RegisterParams,
   unitIds: ReadonlySet<string>,
+  terminalUnitIds: ReadonlySet<string> = NO_TERMINAL_UNITS,
   clock: LaneClock = systemClock
 ): Promise<Lane> {
-  const laneId = safeId(params.laneId, "lane id");
+  const laneId = safeLaneId(params.laneId);
   const unitId = safeId(params.unitId, "unit id");
   const source = resolve(nonEmpty(params.promptPath, "prompt"));
   const cwd = resolve(nonEmpty(params.cwd, "cwd"));
@@ -404,6 +476,9 @@ export async function register(
     ? null
     : positiveSeconds(params.timeoutSeconds, "timeout seconds");
   const prompt = await readPrompt(source);
+  if (prompt.byteLength === 0) {
+    throw new UserError("prompt must not be empty");
+  }
   const promptPath = laneSnapshotPath(store, laneId);
   const promptSha256 = hashBytes(prompt);
   const partial = {
@@ -425,7 +500,7 @@ export async function register(
     laneFingerprint: laneFingerprint(partial, promptSha256),
   };
 
-  const registry = await loadLaneRegistry(store, unitIds);
+  const registry = await loadLaneRegistry(store, unitIds, terminalUnitIds);
   const present = registry.lanes.find((lane) => lane.spec.laneId === laneId);
   if (present !== undefined) {
     if (JSON.stringify(present.spec) !== JSON.stringify(spec)) {
@@ -441,21 +516,27 @@ export async function register(
     spec,
     attempts: [{ kind: "registered", registeredAt: nowIso(clock) }],
   };
-  await saveLaneRegistry(store, {
-    ...registry,
-    lanes: [...registry.lanes, lane],
-  });
+  await saveLaneRegistry(
+    store,
+    {
+      ...registry,
+      lanes: [...registry.lanes, lane],
+    },
+    unitIds,
+    terminalUnitIds
+  );
   return lane;
 }
 
 export async function tick(
   store: string,
   unitIds: ReadonlySet<string>,
+  terminalUnitIds: ReadonlySet<string> = NO_TERMINAL_UNITS,
   clock: LaneClock = systemClock
 ): Promise<readonly LaunchPlan[]> {
   let registry = await settleRegistry(
     store,
-    await loadLaneRegistry(store, unitIds)
+    await loadLaneRegistry(store, unitIds, terminalUnitIds)
   );
   const plans: LaunchPlan[] = [];
   const providers = registry.lanes.reduce<Provider[]>((result, lane) => {
@@ -464,14 +545,16 @@ export async function tick(
   }, []);
 
   for (const provider of providers) {
-    const barrier = providerBarrier(registry, provider);
+    const barrier = providerBarrier(registry, provider, terminalUnitIds);
     if (barrier !== null) {
       const current = barrier.attempt;
       if (current.kind === "claimed") {
+        if (terminalUnitIds.has(barrier.lane.spec.unitId)) continue;
         if (
           !(await pathExists(current.outputPath)) &&
           !(await pathExists(current.receiptPath))
         ) {
+          await validateLaunchInputs(barrier.lane.spec);
           plans.push(attemptPlan(barrier.lane.spec, current));
         }
         continue;
@@ -486,6 +569,7 @@ export async function tick(
     const eligible = registry.lanes.find(
       (lane) =>
         lane.spec.provider === provider &&
+        !terminalUnitIds.has(lane.spec.unitId) &&
         latestAttempt(lane).kind === "registered"
     );
     if (eligible === undefined) continue;
@@ -494,7 +578,7 @@ export async function tick(
     plans.push(claimed.plan);
   }
 
-  await saveLaneRegistry(store, registry);
+  await saveLaneRegistry(store, registry, unitIds, terminalUnitIds);
   return plans;
 }
 
@@ -502,29 +586,31 @@ export async function retry(
   store: string,
   laneId: string,
   unitIds: ReadonlySet<string>,
+  terminalUnitIds: ReadonlySet<string> = NO_TERMINAL_UNITS,
   clock: LaneClock = systemClock
 ): Promise<LaunchPlan> {
+  const cleanLaneId = safeLaneId(laneId);
   let registry = await settleRegistry(
     store,
-    await loadLaneRegistry(store, unitIds)
+    await loadLaneRegistry(store, unitIds, terminalUnitIds)
   );
-  const lane = registry.lanes.find((row) => row.spec.laneId === laneId);
-  if (lane === undefined) throw new UserError(`lane ${laneId} not found`);
+  const lane = registry.lanes.find((row) => row.spec.laneId === cleanLaneId);
+  if (lane === undefined) throw new UserError(`lane ${cleanLaneId} not found`);
   const current = latestAttempt(lane);
   if (current.kind !== "failed" && current.kind !== "interrupted") {
-    await saveLaneRegistry(store, registry);
-    throw new UserError(`lane ${laneId} is not eligible for explicit retry`);
+    await saveLaneRegistry(store, registry, unitIds, terminalUnitIds);
+    throw new UserError(`lane ${cleanLaneId} is not eligible for explicit retry`);
   }
-  const barrier = providerBarrier(registry, lane.spec.provider);
+  const barrier = providerBarrier(registry, lane.spec.provider, terminalUnitIds);
   if (barrier !== null) {
-    await saveLaneRegistry(store, registry);
+    await saveLaneRegistry(store, registry, unitIds, terminalUnitIds);
     throw new UserError(
       `provider ${lane.spec.provider} is occupied by lane ${barrier.lane.spec.laneId}`
     );
   }
   const claimed = await claimLane(store, lane, clock);
   registry = replaceLane(registry, claimed.lane);
-  await saveLaneRegistry(store, registry);
+  await saveLaneRegistry(store, registry, unitIds, terminalUnitIds);
   return claimed.plan;
 }
 
@@ -534,42 +620,45 @@ export async function release(
   attemptId: string,
   reason: string,
   unitIds: ReadonlySet<string>,
+  terminalUnitIds: ReadonlySet<string> = NO_TERMINAL_UNITS,
   clock: LaneClock = systemClock
 ): Promise<Lane> {
+  const cleanLaneId = safeLaneId(laneId);
   let registry = await settleRegistry(
     store,
-    await loadLaneRegistry(store, unitIds)
+    await loadLaneRegistry(store, unitIds, terminalUnitIds)
   );
-  await saveLaneRegistry(store, registry);
-  const lane = registry.lanes.find((row) => row.spec.laneId === laneId);
-  if (lane === undefined) throw new UserError(`lane ${laneId} not found`);
+  await saveLaneRegistry(store, registry, unitIds, terminalUnitIds);
+  const lane = registry.lanes.find((row) => row.spec.laneId === cleanLaneId);
+  if (lane === undefined) throw new UserError(`lane ${cleanLaneId} not found`);
   const current = latestAttempt(lane);
   if (current.kind !== "claimed" || current.attemptId !== attemptId) {
     throw new UserError(
-      `lane ${laneId} does not have claimed attempt ${attemptId}`
+      `lane ${cleanLaneId} does not have claimed attempt ${attemptId}`
     );
   }
   const released = appendAttempt(lane, {
     ...current,
     kind: "interrupted",
-    interruptedAt: nowIso(clock),
+    interruptedAt: monotonicTransitionTime(lane, clock),
     reason: nonEmpty(reason, "release reason"),
   });
   registry = replaceLane(registry, released);
-  await saveLaneRegistry(store, registry);
+  await saveLaneRegistry(store, registry, unitIds, terminalUnitIds);
   return released;
 }
 
 export async function checkUnit(
   store: string,
   unitId: string,
-  unitIds: ReadonlySet<string>
+  unitIds: ReadonlySet<string>,
+  terminalUnitIds: ReadonlySet<string> = NO_TERMINAL_UNITS
 ): Promise<LaneCheck> {
   const registry = await settleRegistry(
     store,
-    await loadLaneRegistry(store, unitIds)
+    await loadLaneRegistry(store, unitIds, terminalUnitIds)
   );
-  await saveLaneRegistry(store, registry);
+  await saveLaneRegistry(store, registry, unitIds, terminalUnitIds);
   const attached = registry.lanes.filter((lane) => lane.spec.unitId === unitId);
   const blockingLaneIds: string[] = [];
   for (const lane of attached) {
