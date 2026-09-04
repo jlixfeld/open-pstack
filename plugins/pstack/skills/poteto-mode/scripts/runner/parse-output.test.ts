@@ -1,7 +1,46 @@
 import { describe, expect, it } from "bun:test";
-import { parseProviderOutput, reportedModelMatches } from "./parse-output.ts";
+import {
+  parseClaudeSessionLimit,
+  parseProviderOutput,
+  reportedModelMatches,
+} from "./parse-output.ts";
+
+const OBSERVED_CLAUDE_SESSION_LIMIT = JSON.stringify({
+  duration_api_ms: 65277,
+  stop_reason: "stop_sequence",
+  session_id: "098e45a4-671d-4f4e-aaaa-51abd7fbc8a3",
+  total_cost_usd: 1.0764304999999998,
+  usage: {
+    input_tokens: 10,
+    cache_creation_input_tokens: 80240,
+    cache_read_input_tokens: 298407,
+    output_tokens: 4932,
+  },
+  modelUsage: { "claude-opus-5": { inputTokens: 10 } },
+  terminal_reason: "api_error",
+  is_error: true,
+  api_error_status: 429,
+  result: "You've hit your session limit · resets 2:10pm (America/Toronto)",
+  type: "result",
+});
 
 describe("parseProviderOutput", () => {
+  it("recognizes the observed structured Claude session-limit envelope", () => {
+    expect(
+      parseClaudeSessionLimit(
+        OBSERVED_CLAUDE_SESSION_LIMIT,
+        "2026-09-04T18:00:00.000Z"
+      )
+    ).toMatchObject({
+      kind: "claude-session-limit",
+      terminalReason: "api_error",
+      apiStatus: 429,
+      observedAt: "2026-09-04T18:00:00.000Z",
+      message: "You've hit your session limit · resets 2:10pm (America/Toronto)",
+      resetEvidence: "You've hit your session limit · resets 2:10pm (America/Toronto)",
+    });
+  });
+
   it("extracts Claude text, model, usage, cost, and session", () => {
     const parsed = parseProviderOutput(
       "claude",
