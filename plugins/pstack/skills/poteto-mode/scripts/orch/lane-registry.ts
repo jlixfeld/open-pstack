@@ -111,6 +111,8 @@ export interface LaneRegistry {
 }
 
 export const MINIMUM_RETRY_INTERVAL_MS = 30 * 60 * 1_000;
+const LANE_REGISTRY_SENTINEL = ".orch.lane-registry.initialized";
+const LANE_REGISTRY_SENTINEL_CONTENTS = "provider-lanes-v1\n";
 
 type JsonRecord = Readonly<Record<string, unknown>>;
 
@@ -412,7 +414,6 @@ function parseAttempts(
       );
       if (!sameClaim(previous, fields)) invalid("complete claim identity");
       const completed = instant(raw.completedAt, "completedAt");
-      if (completed.milliseconds < claimedAt) invalid("completedAt before claimedAt");
       attempts.push({
         kind: "complete",
         ...fields,
@@ -444,7 +445,6 @@ function parseAttempts(
       const next = instant(raw.nextAttemptAt, "nextAttemptAt");
       if (
         spec.provider !== "claude" ||
-        observed.milliseconds < claimedAt ||
         next.milliseconds - observed.milliseconds !== spec.retryIntervalMs
       ) {
         invalid("pause schedule");
@@ -474,7 +474,6 @@ function parseAttempts(
       );
       if (!sameClaim(previous, fields)) invalid("failure claim identity");
       const completed = instant(raw.completedAt, "completedAt");
-      if (completed.milliseconds < claimedAt) invalid("completedAt before claimedAt");
       attempts.push({
         kind: "failed",
         ...fields,
@@ -608,9 +607,23 @@ export async function saveLaneRegistry(
 
 export async function initializeLaneRegistry(store: string): Promise<void> {
   const path = laneRegistryPath(store);
-  if (await pathExists(path)) return;
-
   const root = providerLanesRoot(store);
+  const sentinel = resolve(store, LANE_REGISTRY_SENTINEL);
+  const sentinelExists = await pathExists(sentinel);
+  const registryExists = await pathExists(path);
+  if (sentinelExists) {
+    if (!(await pathExists(root)) || !registryExists) {
+      throw new UserError(
+        "provider lane registry is missing after initialization; the orchestrate store is corrupt"
+      );
+    }
+    return;
+  }
+  if (registryExists) {
+    await writePrivateAtomic(sentinel, LANE_REGISTRY_SENTINEL_CONTENTS);
+    return;
+  }
+
   let entries: readonly string[] = [];
   try {
     entries = await readdir(root);
@@ -627,6 +640,7 @@ export async function initializeLaneRegistry(store: string): Promise<void> {
     { schemaVersion: 1, lanes: [] },
     new Set()
   );
+  await writePrivateAtomic(sentinel, LANE_REGISTRY_SENTINEL_CONTENTS);
 }
 
 export function latestAttempt(lane: Lane): LaneAttempt {

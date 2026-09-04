@@ -7,7 +7,7 @@ import {
 } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { invocationCommand, preflightCommand, type CommandSpec } from "./commands.ts";
-import { ManagedIdentityError, preparePrompt } from "./identity.ts";
+import { ManagedIdentityError, preparePrompt, sha256Hex } from "./identity.ts";
 import {
   parseClaudePauseTelemetry,
   parseClaudeSessionLimit,
@@ -817,12 +817,14 @@ async function executeLane(
         `requested model ${options.model} was not reported by ${options.provider}`
       );
     }
-    finalizeReservation(options.outputPath, parsed.text);
+    const output = new TextEncoder().encode(parsed.text);
+    finalizeReservation(options.outputPath, output);
     receipt = buildReceipt(options, {
       ...base,
       status: "complete",
       modelProof: proof,
       managedAttempt,
+      outputSha256: sha256Hex(output),
       sessionId: parsed.sessionId,
       usage: parsed.usage,
       costUsd: parsed.costUsd,

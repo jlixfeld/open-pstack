@@ -681,13 +681,16 @@ describe("runLane", () => {
 
     expect(result.exitCode).toBe(0);
     expectManagedInvocation(input, invocationLog);
-    expect(receipt(input.receiptPath)).toMatchObject({
+    const recorded = receipt(input.receiptPath);
+    expect(recorded).toMatchObject({
       schemaVersion: 2,
       status: "complete",
       managedAttempt: { ...input.managedAttempt, verified: true },
       providerPause: null,
       error: null,
     });
+    if (recorded.status !== "complete") throw new Error("missing completion receipt");
+    expect(recorded.outputSha256).toBe(sha256Hex(readFileSync(input.outputPath)));
   });
 
   it("hashes and sends the exact managed prompt bytes", async () => {

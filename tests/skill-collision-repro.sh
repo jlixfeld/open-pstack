@@ -222,11 +222,15 @@ for required in \
   'starts the model process at most once' \
   'only sleep or retry is the bounded Grok authentication preflight' \
   'Every managed ordinary or elevated retry uses the unchanged launch plan and fresh managed attempt identity returned by `orch --json lane retry`' \
+  'Call `orch --json lane retry` directly; it reconciles the prior receipt under the store lock before it claims a fresh attempt.' \
   'never substitutes a model or provider'; do
   if ! grep -Fq "$required" "$dispatch"; then
     managed_lane_bad="${managed_lane_bad}provider dispatch lost managed-lane invariant: $required"$'\n'
   fi
 done
+if grep -Fq 'Reconcile the prior receipt through `orch --json lane tick` before asking for that retry plan' "$dispatch"; then
+  managed_lane_bad="${managed_lane_bad}provider dispatch ticks before managed retry and can give the provider to a sibling"$'\n'
+fi
 orchestrate="$plugin/skills/poteto-mode/playbooks/orchestrate.md"
 for required in \
   'orch lane register' \

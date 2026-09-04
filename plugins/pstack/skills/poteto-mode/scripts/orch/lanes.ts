@@ -88,6 +88,7 @@ export type LaneClock = () => number;
 
 const systemClock: LaneClock = () => Date.now();
 const NO_TERMINAL_UNITS: ReadonlySet<string> = new Set();
+const NO_TERMINAL_UNIT_STATES: ReadonlyMap<string, string> = new Map();
 
 function nowIso(clock: LaneClock): string {
   return new Date(clock()).toISOString();
@@ -308,7 +309,6 @@ function receiptMatchesClaim(
     receipt.outputPath === attempt.outputPath &&
     receipt.receiptPath === attempt.receiptPath &&
     receipt.timeoutMs === spec.timeoutMs &&
-    Date.parse(receipt.startedAt) >= Date.parse(attempt.claimedAt) &&
     managed !== null &&
     managed.verified === true &&
     managed.laneId === spec.laneId &&
@@ -352,12 +352,14 @@ async function settleLane(store: string, lane: Lane): Promise<Lane> {
       return lane;
     }
     if (output.byteLength === 0) return lane;
+    const outputSha256 = hashBytes(output);
+    if (outputSha256 !== parsed.receipt.outputSha256) return lane;
     return appendAttempt(lane, {
       ...current,
       kind: "complete",
       completedAt: parsed.receipt.completedAt,
       receiptSha256,
-      outputSha256: hashBytes(output),
+      outputSha256,
     });
   }
 
@@ -454,6 +456,7 @@ async function verifiedComplete(lane: Lane): Promise<boolean> {
   const parsed = parseRunnerReceipt(raw);
   return parsed !== null &&
     parsed.status === "complete" &&
+    parsed.outputSha256 === current.outputSha256 &&
     receiptMatchesClaim(parsed, lane.spec, current);
 }
 
@@ -586,16 +589,24 @@ export async function retry(
   store: string,
   laneId: string,
   unitIds: ReadonlySet<string>,
-  terminalUnitIds: ReadonlySet<string> = NO_TERMINAL_UNITS,
+  terminalUnitStates: ReadonlyMap<string, string> = NO_TERMINAL_UNIT_STATES,
   clock: LaneClock = systemClock
 ): Promise<LaunchPlan> {
   const cleanLaneId = safeLaneId(laneId);
+  const terminalUnitIds = new Set(terminalUnitStates.keys());
   let registry = await settleRegistry(
     store,
     await loadLaneRegistry(store, unitIds, terminalUnitIds)
   );
   const lane = registry.lanes.find((row) => row.spec.laneId === cleanLaneId);
   if (lane === undefined) throw new UserError(`lane ${cleanLaneId} not found`);
+  const terminalState = terminalUnitStates.get(lane.spec.unitId);
+  if (terminalState !== undefined) {
+    await saveLaneRegistry(store, registry, unitIds, terminalUnitIds);
+    throw new UserError(
+      `lane ${cleanLaneId} cannot retry because unit ${lane.spec.unitId} is ${terminalState}`
+    );
+  }
   const current = latestAttempt(lane);
   if (current.kind !== "failed" && current.kind !== "interrupted") {
     await saveLaneRegistry(store, registry, unitIds, terminalUnitIds);

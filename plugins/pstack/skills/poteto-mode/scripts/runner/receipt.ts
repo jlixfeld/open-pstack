@@ -72,6 +72,7 @@ type CompleteReceiptDetails = ProcessDetails & TelemetryDetails & {
   readonly status: "complete";
   readonly modelProof: CompleteModelProof;
   readonly managedAttempt: VerifiedManagedAttempt | null;
+  readonly outputSha256: string;
 };
 
 type ProviderPausedReceiptDetails = ProcessDetails & TelemetryDetails & {
@@ -126,6 +127,7 @@ export function buildReceipt(
         ...details.modelProof,
         status: "complete",
         managedAttempt: details.managedAttempt,
+        outputSha256: details.outputSha256,
         sessionId: details.sessionId,
         usage: details.usage,
         costUsd: details.costUsd,
@@ -138,6 +140,7 @@ export function buildReceipt(
         status: "provider-paused",
         provider: details.provider,
         managedAttempt: details.managedAttempt,
+        outputSha256: null,
         reportedModel: details.reportedModel,
         modelVerified: false,
         modelEvidence: null,
@@ -153,6 +156,7 @@ export function buildReceipt(
         status: details.status,
         provider: details.provider,
         managedAttempt: details.managedAttempt,
+        outputSha256: null,
         reportedModel: null,
         modelVerified: false,
         modelEvidence: null,
@@ -165,11 +169,10 @@ export function buildReceipt(
   }
 }
 
-export function finalizeReservation(path: string, contents: string): void {
+export function finalizeReservation(path: string, contents: string | Uint8Array): void {
   const temporaryPath = `${path}.${randomUUID()}.tmp`;
   try {
     writeFileSync(temporaryPath, contents, {
-      encoding: "utf8",
       mode: 0o600,
       flag: "wx",
     });
@@ -214,6 +217,7 @@ const RECEIPT_KEYS = [
   "usage",
   "costUsd",
   "managedAttempt",
+  "outputSha256",
   "providerPause",
   "error",
 ] as const;
@@ -518,6 +522,11 @@ export function parseRunnerReceipt(value: unknown): RunnerReceiptV2 | null {
       ? input.costUsd
       : invalid;
   const parsedManaged = managedAttempt(input.managedAttempt);
+  const outputSha256 = input.outputSha256 === null
+    ? null
+    : typeof input.outputSha256 === "string" && SHA256_PATTERN.test(input.outputSha256)
+      ? input.outputSha256
+      : invalid;
   if (
     timeoutMs === invalid ||
     started === null ||
@@ -533,6 +542,7 @@ export function parseRunnerReceipt(value: unknown): RunnerReceiptV2 | null {
     parsedUsage === invalid ||
     costUsd === invalid ||
     parsedManaged === invalid ||
+    outputSha256 === invalid ||
     typeof input.modelVerified !== "boolean"
   ) {
     return null;
@@ -651,6 +661,7 @@ export function parseRunnerReceipt(value: unknown): RunnerReceiptV2 | null {
       executable === null ||
       exitCode !== 0 ||
       signal !== null ||
+      outputSha256 === null ||
       input.providerPause !== null ||
       input.error !== null
     ) {
@@ -669,6 +680,7 @@ export function parseRunnerReceipt(value: unknown): RunnerReceiptV2 | null {
         status,
         provider,
         managedAttempt: parsedManaged,
+        outputSha256,
         reportedModel: null,
         modelVerified: false,
         modelEvidence: "pinned-argv",
@@ -689,6 +701,7 @@ export function parseRunnerReceipt(value: unknown): RunnerReceiptV2 | null {
       status,
       provider,
       managedAttempt: parsedManaged,
+      outputSha256,
       reportedModel,
       modelVerified: true,
       modelEvidence: "provider-report",
@@ -708,6 +721,7 @@ export function parseRunnerReceipt(value: unknown): RunnerReceiptV2 | null {
       signal !== null ||
       input.modelVerified !== false ||
       input.modelEvidence !== null ||
+      outputSha256 !== null ||
       input.error !== null ||
       providerPause === null
     ) {
@@ -718,6 +732,7 @@ export function parseRunnerReceipt(value: unknown): RunnerReceiptV2 | null {
       status,
       provider,
       managedAttempt: parsedManaged,
+      outputSha256: null,
       reportedModel,
       modelVerified: false,
       modelEvidence: null,
@@ -729,6 +744,7 @@ export function parseRunnerReceipt(value: unknown): RunnerReceiptV2 | null {
   const error = receiptError(input.error);
   if (
     input.providerPause !== null ||
+    outputSha256 !== null ||
     input.modelVerified !== false ||
     input.modelEvidence !== null ||
     reportedModel !== null ||
@@ -800,6 +816,7 @@ export function parseRunnerReceipt(value: unknown): RunnerReceiptV2 | null {
     ...common,
     status,
     managedAttempt: parsedManaged,
+    outputSha256: null,
     reportedModel: null,
     modelVerified: false,
     modelEvidence: null,

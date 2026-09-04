@@ -159,6 +159,7 @@ type ProviderReportedCompleteReceiptV2 = RunnerReceiptBaseV2 & {
   readonly status: "complete";
   readonly provider: "claude" | "grok";
   readonly managedAttempt: VerifiedManagedAttempt | null;
+  readonly outputSha256: string;
   readonly reportedModel: string;
   readonly modelVerified: true;
   readonly modelEvidence: "provider-report";
@@ -170,6 +171,7 @@ type PinnedArgvCompleteReceiptV2 = RunnerReceiptBaseV2 & {
   readonly status: "complete";
   readonly provider: "codex";
   readonly managedAttempt: VerifiedManagedAttempt | null;
+  readonly outputSha256: string;
   readonly reportedModel: null;
   readonly modelVerified: false;
   readonly modelEvidence: "pinned-argv";
@@ -185,6 +187,7 @@ export interface ProviderPausedReceiptV2 extends RunnerReceiptBaseV2 {
   readonly status: "provider-paused";
   readonly provider: "claude";
   readonly managedAttempt: VerifiedManagedAttempt | null;
+  readonly outputSha256: null;
   readonly modelVerified: false;
   readonly modelEvidence: null;
   readonly providerPause: ClaudeSessionLimitPause;
@@ -194,6 +197,7 @@ export interface ProviderPausedReceiptV2 extends RunnerReceiptBaseV2 {
 export interface FailureReceiptV2 extends RunnerReceiptBaseV2 {
   readonly status: FailureReceiptStatus;
   readonly managedAttempt: UnverifiedManagedAttempt | VerifiedManagedAttempt | null;
+  readonly outputSha256: null;
   readonly modelVerified: false;
   readonly modelEvidence: null;
   readonly providerPause: null;

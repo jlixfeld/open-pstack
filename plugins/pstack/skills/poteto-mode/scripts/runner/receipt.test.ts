@@ -84,6 +84,7 @@ function completeReceipt(provider: "claude" | "codex" = "claude"): RunnerReceipt
     status: "complete",
     modelProof,
     managedAttempt: { ...input.managedAttempt!, verified: true },
+    outputSha256: digest,
     sessionId: "session-1",
     usage: { inputTokens: 10, outputTokens: 20 },
     costUsd: 0.25,
@@ -108,6 +109,9 @@ describe("receipt finalization", () => {
       CompleteModelProof,
       { modelEvidence: "pinned-argv" }
     >;
+    type CompleteReceipt = Extract<RunnerReceiptV2, { status: "complete" }>;
+    type PausedReceipt = Extract<RunnerReceiptV2, { status: "provider-paused" }>;
+    type FailureReceipt = Extract<RunnerReceiptV2, { status: FailureReceiptStatus }>;
 
     expectTypeOf<CompleteDetails["managedAttempt"]>().toEqualTypeOf<
       VerifiedManagedAttempt | null
@@ -122,6 +126,10 @@ describe("receipt finalization", () => {
       reportedModel: null;
       modelVerified: false;
     }>();
+    expectTypeOf<CompleteDetails["outputSha256"]>().toEqualTypeOf<string>();
+    expectTypeOf<CompleteReceipt["outputSha256"]>().toEqualTypeOf<string>();
+    expectTypeOf<PausedReceipt["outputSha256"]>().toEqualTypeOf<null>();
+    expectTypeOf<FailureReceipt["outputSha256"]>().toEqualTypeOf<null>();
   });
 
   it("removes its temporary file when atomic replacement fails", () => {
@@ -142,6 +150,8 @@ describe("runner receipt parsing", () => {
     const claude = completeReceipt("claude");
     const codex = completeReceipt("codex");
 
+    expect(claude.outputSha256).toBe(digest);
+    expect(codex.outputSha256).toBe(digest);
     expect(parseRunnerReceipt(claude)).toEqual(claude);
     expect(parseRunnerReceipt(codex)).toEqual(codex);
   });
@@ -171,6 +181,8 @@ describe("runner receipt parsing", () => {
 
   it("rejects malformed managed identity, telemetry, timing, and status fields", () => {
     const valid = completeReceipt();
+    const missingOutputDigest = { ...valid } as Record<string, unknown>;
+    delete missingOutputDigest.outputSha256;
     const cases: readonly unknown[] = [
       replace(valid, { startedAt: "yesterday" }),
       replace(valid, { completedAt: "2026-09-04T11:59:59.000Z" }),
@@ -196,6 +208,9 @@ describe("runner receipt parsing", () => {
       replace(valid, { usage: { inputTokens: -1 } }),
       replace(valid, { usage: { inputTokens: 1, otherTokens: 2 } }),
       replace(valid, { costUsd: Number.NaN }),
+      missingOutputDigest,
+      replace(valid, { outputSha256: null }),
+      replace(valid, { outputSha256: "A".repeat(64) }),
       replace(valid, { managedAttempt: { verified: true } }),
       replace(valid, {
         managedAttempt: {
@@ -231,6 +246,7 @@ describe("runner receipt parsing", () => {
         modelEvidence: "provider-report",
       },
       managedAttempt: { ...managedAttempt, verified: true },
+      outputSha256: digest,
       sessionId: "session-1",
       usage: { inputTokens: 10 },
       costUsd: 0.25,
@@ -277,7 +293,9 @@ describe("runner receipt parsing", () => {
       },
     });
 
+    expect(paused.outputSha256).toBeNull();
     expect(parseRunnerReceipt(paused)).toEqual(paused);
+    expect(parseRunnerReceipt(replace(paused, { outputSha256: digest }))).toBeNull();
     for (const providerPause of [
       {},
       { ...paused.providerPause, observedAt: "later" },
@@ -318,6 +336,8 @@ describe("runner receipt parsing", () => {
       error: { message: "claude executable not found", evidence: "" },
     });
 
+    expect(failed.outputSha256).toBeNull();
+    expect(unavailable.outputSha256).toBeNull();
     expect(parseRunnerReceipt(failed)).toEqual(failed);
     expect(parseRunnerReceipt(unavailable)).toEqual(unavailable);
     expect(parseRunnerReceipt(replace(failed, { error: null }))).toBeNull();

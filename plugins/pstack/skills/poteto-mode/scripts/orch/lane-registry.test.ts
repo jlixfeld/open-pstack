@@ -323,9 +323,6 @@ describe("provider lane registry parsing", () => {
     const missingOutputDigest = copy(complete);
     delete missingOutputDigest.lanes[0].attempts.at(-1).outputSha256;
     cases.push(missingOutputDigest);
-    const completedBeforeClaim = copy(complete);
-    completedBeforeClaim.lanes[0].attempts.at(-1).completedAt = "2026-09-03T12:00:00.000Z";
-    cases.push(completedBeforeClaim);
 
     const paused = terminal(claimed, "provider-paused");
     const shiftedSchedule = copy(paused);

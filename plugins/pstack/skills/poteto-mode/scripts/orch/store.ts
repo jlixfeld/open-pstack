@@ -289,6 +289,14 @@ function terminalUnitIdSet(units: readonly Unit[]): ReadonlySet<string> {
   );
 }
 
+function terminalUnitStateMap(units: readonly Unit[]): ReadonlyMap<string, string> {
+  return new Map(
+    units
+      .filter((unit) => isTerminalReconciliationState(unit.state))
+      .map((unit) => [unit.id, unit.state] as const)
+  );
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -428,7 +436,8 @@ async function releaseOwnedLock(path: string, pid: string): Promise<void> {
 
 async function acquireRecoveryLock(
   store: string,
-  pid: string
+  pid: string,
+  force: boolean
 ): Promise<() => Promise<void>> {
   const path = join(store, LOCK_RECOVERY_FILE);
   try {
@@ -436,7 +445,64 @@ async function acquireRecoveryLock(
   } catch (error) {
     if (errorCode(error) !== "EEXIST") throw error;
     const holder = (await readLockHolder(path)) ?? "unknown";
-    throw new UserError(`store lock recovery held by pid ${holder}`);
+    if (!force && !holderIsDead(holder)) {
+      throw new UserError(`store lock recovery held by pid ${holder}`);
+    }
+
+    const currentHolder = await readLockHolder(path);
+    if (
+      currentHolder !== holder ||
+      (!force && !holderIsDead(currentHolder))
+    ) {
+      throw new UserError(
+        `store lock recovery held by pid ${currentHolder ?? "unknown"}`
+      );
+    }
+
+    const displacedPath = join(
+      store,
+      `${LOCK_RECOVERY_FILE}.${pid}.${randomUUID()}.stale`
+    );
+    try {
+      await rename(path, displacedPath);
+    } catch (renameError) {
+      if (errorCode(renameError) !== "ENOENT") throw renameError;
+      const current = (await readLockHolder(path)) ?? "unknown";
+      throw new UserError(`store lock recovery held by pid ${current}`);
+    }
+
+    let ownsLock = false;
+    try {
+      try {
+        await writePidLock(path, pid);
+        ownsLock = true;
+      } catch (createError) {
+        if (errorCode(createError) !== "EEXIST") throw createError;
+        const current = (await readLockHolder(path)) ?? "unknown";
+        throw new UserError(`store lock recovery held by pid ${current}`);
+      }
+
+      const displacedHolder = (await readLockHolder(displacedPath)) ?? "unknown";
+      if (
+        displacedHolder !== holder ||
+        (!force && !holderIsDead(displacedHolder))
+      ) {
+        await rename(displacedPath, path);
+        ownsLock = false;
+        throw new UserError(
+          `store lock recovery held by pid ${displacedHolder}`
+        );
+      }
+    } finally {
+      await rm(displacedPath, { force: true });
+      if (ownsLock && (await readLockHolder(path)) !== pid) {
+        ownsLock = false;
+      }
+    }
+    if (!ownsLock) {
+      const current = (await readLockHolder(path)) ?? "unknown";
+      throw new UserError(`store lock recovery held by pid ${current}`);
+    }
   }
   return () => releaseOwnedLock(path, pid);
 }
@@ -472,10 +538,21 @@ async function acquireLock(
     if (errorCode(error) !== "EEXIST") {
       throw error;
     }
-    const releaseRecovery = await acquireRecoveryLock(store, pid);
+    const releaseRecovery = await acquireRecoveryLock(
+      store,
+      pid,
+      options.force === true
+    );
     try {
+      const ensureRecoveryOwnership = async (): Promise<void> => {
+        if (await readLockHolder(join(store, LOCK_RECOVERY_FILE)) !== pid) {
+          throw new UserError("store lock recovery ownership changed");
+        }
+      };
+      await ensureRecoveryOwnership();
       const holder = await readLockHolder(path);
       if (holder === null) {
+        await ensureRecoveryOwnership();
         try {
           await create();
         } catch (retryError) {
@@ -484,9 +561,11 @@ async function acquireLock(
         }
       } else if (holderIsDead(holder)) {
         options.onStaleLock?.(holder);
+        await ensureRecoveryOwnership();
         await replace();
       } else if (options.force) {
         options.onLockStolen?.(holder);
+        await ensureRecoveryOwnership();
         await replace();
       } else {
         throw new UserError(`store lock held by pid ${holder}`);
@@ -1349,7 +1428,7 @@ export function openStore(
           store,
           requiredCell(laneId, "lane id"),
           unitIds,
-          terminalUnitIdSet(units),
+          terminalUnitStateMap(units),
           options.now
         );
       },

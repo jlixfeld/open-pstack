@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "../runner/cli.ts";
 import { invocationCommand, preflightCommand } from "../runner/commands.ts";
+import { sha256Hex } from "../runner/identity.ts";
 import { buildReceipt } from "../runner/receipt.ts";
 import { runLane } from "../runner/run.ts";
 import type {
@@ -30,6 +31,7 @@ import { openStore, type Store } from "./store.ts";
 const directories: string[] = [];
 const stores: Store[] = [];
 const START = Date.parse("2026-09-04T12:00:00.000Z");
+const COMPLETE_OUTPUT = "review complete\n";
 
 interface Fixture {
   readonly directory: string;
@@ -133,6 +135,7 @@ function completeReceipt(
     status: "complete",
     modelProof,
     managedAttempt: verifiedAttempt(input),
+    outputSha256: sha256Hex(COMPLETE_OUTPUT),
     sessionId: "session-1",
     usage: { inputTokens: 10, outputTokens: 20 },
     costUsd: 0.25,
@@ -212,7 +215,7 @@ async function writeJson(path: string, value: unknown): Promise<void> {
 }
 
 async function finishComplete(plan: LaunchPlan, completedAt?: number): Promise<void> {
-  await writeFile(plan.outputPath, "review complete\n");
+  await writeFile(plan.outputPath, COMPLETE_OUTPUT);
   await writeJson(plan.receiptPath, completeReceipt(plan, completedAt));
 }
 
@@ -396,6 +399,26 @@ describe("managed provider lane registration", () => {
 });
 
 describe("managed provider lane scheduling", () => {
+  it("settles a canonical completion when the runner clock is behind the clamped claim", async () => {
+    const { directory, store, prompt, setNow } = await fixture();
+    await store.lanes.register(registration(prompt));
+
+    setNow(START - 5_000);
+    const [plan] = await store.lanes.tick();
+    if (plan === undefined) throw new Error("missing plan");
+    await finishComplete(plan, START - 1_000);
+
+    expect(await store.lanes.tick()).toEqual([]);
+    expect((await registry(directory)).lanes[0].attempts.at(-1).kind).toBe(
+      "complete"
+    );
+    expect(await store.lanes.check("unit")).toEqual({
+      unitId: "unit",
+      ready: true,
+      blockingLaneIds: [],
+    });
+  });
+
   it("clamps claim, release, and retry transitions when the wall clock rolls back", async () => {
     const { directory, store, prompt, setNow } = await fixture();
     await store.lanes.register(registration(prompt));
@@ -614,6 +637,35 @@ describe("managed provider lane scheduling", () => {
       .attempts.at(-1).kind).toBe("provider-paused");
     expect(value.lanes.find((lane: any) => lane.spec.laneId === "live-review")
       .attempts.at(-1).kind).toBe("claimed");
+  });
+
+  it("rejects retry on terminal units without starving a live sibling", async () => {
+    for (const state of ["abandoned", "zombie-reconciled"] as const) {
+      const { directory, store, prompt } = await fixture();
+      await store.lanes.register(registration(prompt, { laneId: "dead-review" }));
+      const [failed] = await store.lanes.tick();
+      if (failed === undefined) throw new Error("missing failed plan");
+      await finishFailure(failed);
+      await store.units.set({ id: "unit", state });
+
+      await store.units.add({ id: "live-unit", track: "test" });
+      await store.lanes.register(registration(prompt, {
+        laneId: "live-review",
+        unitId: "live-unit",
+      }));
+
+      await expect(store.lanes.retry("dead-review")).rejects.toThrow(
+        `unit unit is ${state}`
+      );
+      const [live] = await store.lanes.tick();
+      expect(live?.laneId).toBe("live-review");
+
+      const value = await registry(directory);
+      expect(value.lanes.find((lane: any) => lane.spec.laneId === "dead-review")
+        .attempts.at(-1).kind).toBe("failed");
+      expect(value.lanes.find((lane: any) => lane.spec.laneId === "live-review")
+        .attempts.at(-1).kind).toBe("claimed");
+    }
   });
 
   it("keeps a terminal unit's claimed child provider-occupying", async () => {
@@ -847,6 +899,25 @@ describe("managed provider lane outcomes and gates", () => {
     }
   });
 
+  it("holds a complete receipt when output changes before first reconciliation", async () => {
+    const { directory, store, prompt } = await fixture();
+    await store.lanes.register(registration(prompt));
+    const [plan] = await store.lanes.tick();
+    if (plan === undefined) throw new Error("missing plan");
+    await finishComplete(plan);
+    await writeFile(plan.outputPath, "tampered before reconciliation\n");
+
+    expect(await store.lanes.tick()).toEqual([]);
+    expect((await registry(directory)).lanes[0].attempts.at(-1).kind).toBe(
+      "claimed"
+    );
+    expect((await store.lanes.check("unit")).ready).toBe(false);
+
+    await writeFile(plan.outputPath, COMPLETE_OUTPUT);
+    expect(await store.lanes.tick()).toEqual([]);
+    expect((await store.lanes.check("unit")).ready).toBe(true);
+  });
+
   it("accepts Claude build-qualified proof and Codex pinned-argv proof", async () => {
     const { store, prompt, setNow } = await fixture();
     await store.units.add({ id: "codex-unit", track: "test" });
@@ -903,11 +974,6 @@ describe("managed receipt rejection", () => {
         preflight: { ...valid.preflight, status: "not-run" },
       })],
       ["invalid timing", (valid) => ({ ...valid, elapsedMs: valid.elapsedMs + 1 })],
-      ["timing before claim", (valid) => ({
-        ...valid,
-        startedAt: "2020-01-01T00:00:00.000Z",
-        completedAt: "2020-01-01T00:00:01.250Z",
-      })],
       ["invalid error", (valid) => ({ ...valid, error: {} })],
       ["invalid pause field", (valid) => ({ ...valid, providerPause: {} })],
       ["invalid model proof", (valid) => ({ ...valid, reportedModel: "claude-opus-4" })],

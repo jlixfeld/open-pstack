@@ -113,7 +113,7 @@ Grok authentication preflight has one bounded retry. If the first `grok models` 
 
 The parent tool sandbox still governs whether a subscribed child CLI can reach its credentials and network. Run setup's live probe from the actual parent profile.
 
-Every managed ordinary or elevated retry uses the unchanged launch plan and fresh managed attempt identity returned by `orch --json lane retry`; never hand-invent attempt IDs or artifact paths. Reconcile the prior receipt through `orch --json lane tick` before asking for that retry plan, then execute the returned command and argv unchanged.
+Every managed ordinary or elevated retry uses the unchanged launch plan and fresh managed attempt identity returned by `orch --json lane retry`; never hand-invent attempt IDs or artifact paths. Call `orch --json lane retry` directly; it reconciles the prior receipt under the store lock before it claims a fresh attempt. Do not call `orch --json lane tick` first because that command may give the provider to a live sibling. Execute the retry command and argv unchanged.
 
 Codex on macOS has one scoped exception. Claude Code stores a normal `claude auth login` session in the macOS Keychain, which the Codex sandbox can block even when the user is logged in. When a Codex parent launches a Claude lane, request one elevated attempt only when the sandboxed receipt contains all of these fields:
 
@@ -150,9 +150,9 @@ Success requires all of these:
 1. Exit status `0`.
 2. Receipt status `complete`.
 3. Either `modelVerified: true` with `modelEvidence: "provider-report"`, or a Codex receipt with `reportedModel: null`, `modelVerified: false`, and `modelEvidence: "pinned-argv"`. Codex 0.149.0 accepts the exact `--model` argument but does not report the served model in its JSONL stream.
-4. A non-empty output file.
+4. A non-empty output file whose exact bytes match the receipt's required `outputSha256`.
 
-The receipt also carries elapsed time, token usage when the CLI exposes it, and cost when available. Keep it with the arena or review artifacts so parent-harness comparisons are evidence-based.
+Schema-v2 complete receipts bind the output bytes with `outputSha256`. Provider-paused and failure receipts set that field to `null`. The receipt also carries elapsed time, token usage when the CLI exposes it, and cost when available. Keep it with the arena or review artifacts so parent-harness comparisons are evidence-based.
 
 Any missing CLI, failed login, unavailable model, explicit timeout, cancellation, catchable post-reservation launcher failure, non-zero child exit, malformed result, or model mismatch is a receipt-bearing dropout. Record it and apply the calling skill's existing dropout policy. Only runner exit 75 paired with a schema-v2 `provider-paused` receipt is excluded, whether managed or unmanaged. Managed orchestration retries the exact lane no sooner than its due time. Without managed identity, preserve the receipt and report the panel as paused rather than proceeding with N-1; any later invocation remains the same explicitly selected route. A `cancelled` receipt proves that the runner received the signal; its `signal` field is non-null only when the runner sent that signal to a still-active direct CLI child, and remains null when cancellation only stopped a post-exit pipe drain. The provider CLI owns any processes it starts beneath that direct child; the receipt does not claim a process-tree kill. Do not delete or overwrite the receipt. Never substitute the parent model, retry another provider, or reinterpret an external descriptor as a native model slug.
 
