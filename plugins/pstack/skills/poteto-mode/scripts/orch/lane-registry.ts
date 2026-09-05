@@ -1,9 +1,12 @@
+import type { Dirent } from "node:fs";
 import {
   readFile,
   readdir,
+  unlink,
 } from "node:fs/promises";
 import {
   isAbsolute,
+  join,
   relative,
   resolve,
   sep,
@@ -113,6 +116,8 @@ export interface LaneRegistry {
 export const MINIMUM_RETRY_INTERVAL_MS = 30 * 60 * 1_000;
 const LANE_REGISTRY_SENTINEL = ".orch.lane-registry.initialized";
 const LANE_REGISTRY_SENTINEL_CONTENTS = "provider-lanes-v1\n";
+const LANE_REGISTRY_TEMPORARY_PATTERN =
+  /^\.registry\.json\.[1-9]\d*\.[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/;
 
 type JsonRecord = Readonly<Record<string, unknown>>;
 
@@ -629,13 +634,23 @@ export async function initializeLaneRegistry(store: string): Promise<void> {
     return;
   }
 
-  let entries: readonly string[] = [];
+  let entries: readonly Dirent[] = [];
   try {
-    entries = await readdir(root);
+    entries = await readdir(root, { withFileTypes: true });
   } catch (error) {
     if (errorCode(error) !== "ENOENT") throw error;
   }
-  if (entries.length > 0) {
+  const interruptedWrites = entries.filter((entry) =>
+    entry.isFile() && LANE_REGISTRY_TEMPORARY_PATTERN.test(entry.name)
+  );
+  for (const entry of interruptedWrites) {
+    try {
+      await unlink(join(root, entry.name));
+    } catch (error) {
+      if (errorCode(error) !== "ENOENT") throw error;
+    }
+  }
+  if (entries.length !== interruptedWrites.length) {
     throw new UserError(
       "provider lane registry is missing with orphaned provider lane artifacts"
     );

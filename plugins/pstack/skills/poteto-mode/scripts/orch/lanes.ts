@@ -414,6 +414,23 @@ interface ProviderOccupancy {
   readonly attempt: ClaimedAttempt | PausedAttempt;
 }
 
+function siblingClaimProvesPauseExpired(
+  registry: LaneRegistry,
+  pausedLane: Lane,
+  nextAttemptAt: number
+): boolean {
+  return registry.lanes.some(
+    (lane) =>
+      lane.spec.provider === pausedLane.spec.provider &&
+      lane.spec.laneId !== pausedLane.spec.laneId &&
+      lane.attempts.some(
+        (attempt) =>
+          attempt.kind !== "registered" &&
+          Date.parse(attempt.claimedAt) >= nextAttemptAt
+      )
+  );
+}
+
 function providerBarrier(
   registry: LaneRegistry,
   provider: Provider,
@@ -423,14 +440,20 @@ function providerBarrier(
   for (const lane of registry.lanes) {
     if (lane.spec.provider !== provider) continue;
     const current = latestAttempt(lane);
-    if (
-      current.kind === "claimed" ||
-      (current.kind === "provider-paused" &&
-        (!terminalUnitIds.has(lane.spec.unitId) ||
-          clock() < Date.parse(current.nextAttemptAt)))
-    ) {
+    if (current.kind === "claimed") return { lane, attempt: current };
+  }
+  for (const lane of registry.lanes) {
+    if (lane.spec.provider !== provider) continue;
+    const current = latestAttempt(lane);
+    if (current.kind !== "provider-paused") continue;
+    if (!terminalUnitIds.has(lane.spec.unitId)) {
       return { lane, attempt: current };
     }
+    const nextAttemptAt = Date.parse(current.nextAttemptAt);
+    if (
+      clock() < nextAttemptAt &&
+      !siblingClaimProvesPauseExpired(registry, lane, nextAttemptAt)
+    ) return { lane, attempt: current };
   }
   return null;
 }
@@ -518,10 +541,16 @@ export async function register(
   const registry = await loadLaneRegistry(store, unitIds, terminalUnitIds);
   const present = registry.lanes.find((lane) => lane.spec.laneId === laneId);
   if (present !== undefined) {
-    if (JSON.stringify(present.spec) !== JSON.stringify(spec)) {
+    if (
+      promptSha256 !== present.spec.promptSha256 ||
+      JSON.stringify(present.spec) !== JSON.stringify(spec)
+    ) {
       throw new UserError(
         `lane ${laneId} is already registered with a different immutable specification`
       );
+    }
+    if (!(await pathExists(present.spec.promptPath))) {
+      await writePrivateAtomic(present.spec.promptPath, prompt);
     }
     return present;
   }
@@ -565,21 +594,38 @@ export async function tick(
     if (barrier !== null) {
       const current = barrier.attempt;
       if (current.kind === "claimed") {
-        if (terminalUnitIds.has(barrier.lane.spec.unitId)) continue;
-        if (
-          !(await pathExists(current.outputPath)) &&
-          !(await pathExists(current.receiptPath))
-        ) {
-          try {
-            await validateLaunchInputs(barrier.lane.spec);
-            plans.push(attemptPlan(barrier.lane.spec, current));
-          } catch (error) {
-            if (!(error instanceof UserError)) throw error;
-            stalledLanes.push({
-              laneId: barrier.lane.spec.laneId,
-              reason: error.message,
-            });
-          }
+        const [outputExists, receiptExists] = await Promise.all([
+          pathExists(current.outputPath),
+          pathExists(current.receiptPath),
+        ]);
+        if (outputExists || receiptExists) {
+          const artifacts = outputExists && receiptExists
+            ? "output and receipt artifacts that have not settled"
+            : outputExists
+              ? "an output artifact without a receipt artifact"
+              : "a receipt artifact without an output artifact";
+          stalledLanes.push({
+            laneId: barrier.lane.spec.laneId,
+            reason: `lane ${barrier.lane.spec.laneId} claim has ${artifacts}; provider ${provider} remains occupied`,
+          });
+          continue;
+        }
+        if (terminalUnitIds.has(barrier.lane.spec.unitId)) {
+          stalledLanes.push({
+            laneId: barrier.lane.spec.laneId,
+            reason: `lane ${barrier.lane.spec.laneId} is claimed without launcher artifacts on terminal unit ${barrier.lane.spec.unitId}; provider ${provider} remains occupied`,
+          });
+          continue;
+        }
+        try {
+          await validateLaunchInputs(barrier.lane.spec);
+          plans.push(attemptPlan(barrier.lane.spec, current));
+        } catch (error) {
+          if (!(error instanceof UserError)) throw error;
+          stalledLanes.push({
+            laneId: barrier.lane.spec.laneId,
+            reason: error.message,
+          });
         }
         continue;
       }

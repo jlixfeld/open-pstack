@@ -319,6 +319,33 @@ describe("managed provider lane registration", () => {
     expect(await readFile(first.spec.promptPath, "utf8")).toBe("original bytes\n");
   });
 
+  it("repairs a missing immutable snapshot from matching registration bytes", async () => {
+    const { directory, store, prompt } = await fixture("original bytes\n");
+    const first = await store.lanes.register(registration(prompt));
+    await rm(first.spec.promptPath);
+
+    const repaired = await store.lanes.register(registration(prompt));
+
+    expect(repaired).toEqual(first);
+    expect(await readFile(first.spec.promptPath, "utf8")).toBe("original bytes\n");
+    expect((await stat(first.spec.promptPath)).mode & 0o777).toBe(0o600);
+    expect((await registry(directory)).lanes).toEqual([first]);
+  });
+
+  it("does not recreate a missing immutable snapshot from changed source bytes", async () => {
+    const { directory, store, prompt } = await fixture("original bytes\n");
+    const first = await store.lanes.register(registration(prompt));
+    await rm(first.spec.promptPath);
+    await writeFile(prompt, "changed source\n");
+
+    await expect(store.lanes.register(registration(prompt))).rejects.toThrow(
+      "different immutable specification"
+    );
+
+    expect(await stat(first.spec.promptPath).catch(() => null)).toBeNull();
+    expect((await registry(directory)).lanes).toEqual([first]);
+  });
+
   it("rejects changed immutable specs and every runner-invalid managed route", async () => {
     const { directory, store, prompt } = await fixture();
     await store.lanes.register(registration(prompt));
@@ -487,9 +514,11 @@ describe("managed provider lane scheduling", () => {
     expect(await tickPlans(restarted)).toEqual(first);
   });
 
-  it("does not relaunch when either artifact exists", async () => {
-    const { store, prompt } = await fixture();
+  it("reports held partial artifacts without relaunching or yielding the provider", async () => {
+    const { directory, store, prompt } = await fixture();
     await store.units.add({ id: "codex-unit", track: "test" });
+    await store.units.add({ id: "claude-next-unit", track: "test" });
+    await store.units.add({ id: "codex-next-unit", track: "test" });
     await store.lanes.register(registration(prompt));
     await store.lanes.register(registration(prompt, {
       laneId: "codex-review",
@@ -503,7 +532,37 @@ describe("managed provider lane scheduling", () => {
     expect(plans).toHaveLength(2);
     await writeFile(plans[0]!.outputPath, "reserved");
     await writeFile(plans[1]!.receiptPath, "{");
-    expect(await tickPlans(store)).toEqual([]);
+    await store.lanes.register(registration(prompt, {
+      laneId: "claude-next",
+      unitId: "claude-next-unit",
+    }));
+    await store.lanes.register(registration(prompt, {
+      laneId: "codex-next",
+      unitId: "codex-next-unit",
+      parent: "claude",
+      provider: "codex",
+      model: "gpt-5.6-sol",
+      effort: "max",
+    }));
+
+    expect(await store.lanes.tick()).toEqual({
+      plans: [],
+      stalledLanes: [
+        {
+          laneId: "claude-review",
+          reason: "lane claude-review claim has an output artifact without a receipt artifact; provider claude remains occupied",
+        },
+        {
+          laneId: "codex-review",
+          reason: "lane codex-review claim has a receipt artifact without an output artifact; provider codex remains occupied",
+        },
+      ],
+    });
+    const value = await registry(directory);
+    expect(value.lanes.find((lane: any) => lane.spec.laneId === "claude-next")
+      .attempts.at(-1).kind).toBe("registered");
+    expect(value.lanes.find((lane: any) => lane.spec.laneId === "codex-next")
+      .attempts.at(-1).kind).toBe("registered");
   });
 
   it("keeps provider-wide single-flight across duplicate wakes", async () => {
@@ -654,6 +713,52 @@ describe("managed provider lane scheduling", () => {
     ).attempts.at(-1).kind).toBe("provider-paused");
   });
 
+  it("replays a live sibling claim after restart and rollback past an expired terminal pause", async () => {
+    const { directory, store, prompt, setNow } = await fixture();
+    await store.lanes.register(registration(prompt, { laneId: "dead-pause" }));
+    const [first] = await tickPlans(store);
+    if (first === undefined) throw new Error("missing first plan");
+    await finishPause(first);
+    setNow(START + 5_000);
+    await tickPlans(store);
+    await store.units.set({ id: "unit", state: "abandoned" });
+
+    await store.units.add({ id: "live-unit", track: "test" });
+    await store.lanes.register(registration(prompt, {
+      laneId: "live-review",
+      unitId: "live-unit",
+    }));
+    setNow(START + 5_000 + 1_800_000);
+    const [live] = await tickPlans(store);
+    if (live === undefined) throw new Error("missing live sibling plan");
+
+    await store.close();
+    const restarted = openStore(directory, {
+      now: () => START + 5_000 + 60_000,
+    });
+    stores.push(restarted);
+
+    expect(await tickPlans(restarted)).toEqual([live]);
+    const value = await registry(directory);
+    expect(value.lanes.find((lane: any) => lane.spec.laneId === "dead-pause")
+      .attempts.at(-1).kind).toBe("provider-paused");
+    expect(value.lanes.find((lane: any) => lane.spec.laneId === "live-review")
+      .attempts.at(-1)).toMatchObject({
+        kind: "claimed",
+        attemptId: live.attemptId,
+      });
+
+    await restarted.units.add({ id: "later-unit", track: "test" });
+    await restarted.lanes.register(registration(prompt, {
+      laneId: "later-review",
+      unitId: "later-unit",
+    }));
+    await finishComplete(live, START + 5_000 + 1_800_001);
+
+    const [later] = await tickPlans(restarted);
+    expect(later?.laneId).toBe("later-review");
+  });
+
   it("rejects retry on terminal units without starving a live sibling", async () => {
     for (const state of ["abandoned", "zombie-reconciled"] as const) {
       const { directory, store, prompt } = await fixture();
@@ -695,7 +800,13 @@ describe("managed provider lane scheduling", () => {
       unitId: "live-unit",
     }));
 
-    expect(await tickPlans(store)).toEqual([]);
+    expect(await store.lanes.tick()).toEqual({
+      plans: [],
+      stalledLanes: [{
+        laneId: "dead-claim",
+        reason: "lane dead-claim is claimed without launcher artifacts on terminal unit unit; provider claude remains occupied",
+      }],
+    });
     const value = await registry(directory);
     expect(value.lanes.find((lane: any) => lane.spec.laneId === "dead-claim")
       .attempts.at(-1).kind).toBe("claimed");

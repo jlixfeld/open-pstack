@@ -232,6 +232,36 @@ describe("Store", () => {
     expect(await readdir(directory)).not.toContain(".orch.lock");
   });
 
+  it("recovers first initialization after a registry atomic-write interruption", async () => {
+    const directory = await makeDirectory();
+    const providerLanes = join(directory, "provider-lanes");
+    const interrupted = `.registry.json.${process.pid}.00000000-0000-4000-8000-000000000000.tmp`;
+    await mkdir(providerLanes);
+    await writeFile(join(providerLanes, interrupted), '{"schemaVersion":1');
+    const store = useStore(directory);
+
+    expect(await store.init()).toEqual({ store: directory });
+    expect(JSON.parse(
+      await readFile(join(providerLanes, "registry.json"), "utf8")
+    )).toEqual({ schemaVersion: 1, lanes: [] });
+    expect(await readdir(providerLanes)).toEqual(["registry.json"]);
+    expect(await store.init()).toEqual({ store: directory });
+  });
+
+  it("preserves an unrecognized registry temporary-file lookalike", async () => {
+    const directory = await makeDirectory();
+    const providerLanes = join(directory, "provider-lanes");
+    const lookalike = `.registry.json.${process.pid}.not-a-uuid.tmp`;
+    await mkdir(providerLanes);
+    await writeFile(join(providerLanes, lookalike), "unrecognized\n");
+    const store = useStore(directory);
+
+    await expect(store.init()).rejects.toThrow("orphaned provider lane artifacts");
+    expect(await readFile(join(providerLanes, lookalike), "utf8")).toBe(
+      "unrecognized\n"
+    );
+  });
+
   it("composes unit add, set, get, list, and counts", async () => {
     const { store } = await initializedStore();
 
@@ -972,6 +1002,108 @@ describe("orch CLI", () => {
         reason: "lane review working directory is missing or is not a directory",
       }],
     });
+  });
+
+  it("reports terminal and partial-artifact claim barriers in plain and JSON tick output", async () => {
+    const directory = await makeDirectory();
+    const prompt = join(directory, "prompt.md");
+    await writeFile(prompt, "review this\n");
+    const store = useStore(directory);
+    await store.init();
+    for (const unit of ["terminal-unit", "partial-unit", "claude-next", "codex-next"]) {
+      await store.units.add({ id: unit, track: "test" });
+    }
+    await store.lanes.register({
+      laneId: "terminal-review",
+      unitId: "terminal-unit",
+      parent: "codex",
+      provider: "claude",
+      model: "claude-opus-5",
+      effort: "xhigh",
+      mode: "read-only",
+      promptPath: prompt,
+      cwd: "/tmp",
+    });
+    await store.lanes.register({
+      laneId: "partial-review",
+      unitId: "partial-unit",
+      parent: "claude",
+      provider: "codex",
+      model: "gpt-5.6-sol",
+      effort: "max",
+      mode: "read-only",
+      promptPath: prompt,
+      cwd: "/tmp",
+    });
+    const initial = (await store.lanes.tick()).plans;
+    expect(initial).toHaveLength(2);
+    const partial = initial.find((plan) => plan.laneId === "partial-review");
+    if (partial === undefined) throw new Error("missing partial plan");
+    await writeFile(partial.outputPath, "reserved");
+    await store.units.set({ id: "terminal-unit", state: "abandoned" });
+    await store.lanes.register({
+      laneId: "claude-next",
+      unitId: "claude-next",
+      parent: "codex",
+      provider: "claude",
+      model: "claude-opus-5",
+      effort: "xhigh",
+      mode: "read-only",
+      promptPath: prompt,
+      cwd: "/tmp",
+    });
+    await store.lanes.register({
+      laneId: "codex-next",
+      unitId: "codex-next",
+      parent: "claude",
+      provider: "codex",
+      model: "gpt-5.6-sol",
+      effort: "max",
+      mode: "read-only",
+      promptPath: prompt,
+      cwd: "/tmp",
+    });
+    await store.close();
+
+    const plain = runCli(["--store", directory, "lane", "tick"]);
+    expect(plain).toEqual({
+      code: 0,
+      stdout: "(no launch)\n",
+      stderr: [
+        "STALLED\tterminal-review\tlane terminal-review is claimed without launcher artifacts on terminal unit terminal-unit; provider claude remains occupied",
+        "STALLED\tpartial-review\tlane partial-review claim has an output artifact without a receipt artifact; provider codex remains occupied",
+        "",
+      ].join("\n"),
+    });
+
+    const json = runCli(["--store", directory, "--json", "lane", "tick"]);
+    expect(json.code).toBe(0);
+    expect(json.stderr).toBe("");
+    expect(JSON.parse(json.stdout)).toEqual({
+      plans: [],
+      stalledLanes: [
+        {
+          laneId: "terminal-review",
+          reason: "lane terminal-review is claimed without launcher artifacts on terminal unit terminal-unit; provider claude remains occupied",
+        },
+        {
+          laneId: "partial-review",
+          reason: "lane partial-review claim has an output artifact without a receipt artifact; provider codex remains occupied",
+        },
+      ],
+    });
+
+    const registry = JSON.parse(
+      await readFile(join(directory, "provider-lanes", "registry.json"), "utf8")
+    );
+    expect(registry.lanes.find(
+      (lane: { readonly spec: { readonly laneId: string } }) =>
+        lane.spec.laneId === "claude-next"
+    ).attempts.at(-1).kind).toBe("registered");
+    expect(registry.lanes.find(
+      (lane: { readonly spec: { readonly laneId: string } }) =>
+        lane.spec.laneId === "codex-next"
+    ).attempts.at(-1).kind).toBe("registered");
   });
 
   it("maps user and not-found outcomes to the preserved exit codes", async () => {
