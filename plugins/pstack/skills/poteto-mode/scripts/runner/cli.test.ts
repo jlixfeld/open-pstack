@@ -98,6 +98,9 @@ describe("runner CLI parsing", () => {
   });
 
   it("rejects unsupported provider, model, and family effort combinations", () => {
+    expect(() => parseArgs(argv(["--model", "gpt-6-astra", "--effort", "ultra"]))).toThrow(
+      "unsupported model or effort: codex:gpt-6-astra@ultra"
+    );
     expect(() => parseArgs(argv(["--provider", "claude", "--model", "gpt-5.6-sol"]))).toThrow(
       "unsupported model or effort: claude:gpt-5.6-sol@max"
     );

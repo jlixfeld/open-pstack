@@ -10,16 +10,14 @@ pstack model choices are provider-qualified descriptors:
 
 | Family | Upstream pstack choice | Provider | Model | Default effort | Selectable efforts | Claude-native agent stem |
 |---|---|---|---|---|---|---|
-| fable | claude-fable-5-1-thinking-max | claude | claude-fable-5-1 | max | low medium high xhigh max | fable |
-| sol | gpt-5.6-sol-max | codex | gpt-5.6-sol | max | low medium high xhigh max ultra | - |
+| astra | gpt-6-astra-high | codex | gpt-6-astra | medium | low medium high xhigh max | - |
+| sol | gpt-5.6-sol-high | codex | gpt-5.6-sol | medium | low medium high xhigh max ultra | - |
 | terra | gpt-5.6-terra-high | codex | gpt-5.6-terra | high | low medium high xhigh max ultra | - |
 | luna | gpt-5.6-luna-high | codex | gpt-5.6-luna | high | low medium high xhigh max | - |
-| grok | grok-4.6-fast-xhigh | grok | grok-4.6 | xhigh | low medium high xhigh max | - |
-| opus | claude-opus-5-thinking-xhigh | claude | claude-opus-5 | xhigh | low medium high xhigh max | opus |
 
-Selectable efforts are family-specific. Sol and Terra accept `ultra`; Luna stops at `max`; Fable, Grok, and Opus preserve their current valid efforts. The matrix describes every supported family, but an active map may omit any family. A Claude-native agent stem of `-` means the family has no Claude-native agent. Otherwise the shipped agent name is `pstack-<stem>-<effort>`.
+This experimental active matrix routes work only to OpenAI models. Astra's portable documented set is `low`, `medium`, `high`, `xhigh`, and `max`; do not select `ultra` until the actual CLI verifies it. Sol and Terra retain `ultra` support, and Luna stops at `max`. The runner retains its dormant Claude and Grok acceptance for immutable existing lanes and receipt parsing; those families are not selectable through this active matrix. A Claude-native agent stem of `-` means no native agent is shipped.
 
-`fast` is part of Cursor's Grok selector, not a Grok Build CLI model or effort flag. The portable Grok route pins the current CLI model `grok-4.6`. The first-run Grok effort is `xhigh`.
+Use `medium` for broad work and independent review. Select `high` explicitly for coupled retry, persisted state, authentication, or concurrency work. Use `xhigh` for the hardest tasks. `max` is an explicit operator choice; no first-run lane selects `max` or `ultra`. The map does not dynamically raise effort. See the [Astra effort experiment](../../../../../docs/astra-effort-experiment.md) for the recorded evidence.
 
 ## Role registry
 
@@ -31,23 +29,23 @@ one lane. A `panel` launches every stored lane in order, including repeats. A
 | --- | --- | --- |
 | feature implementation | single | codex:gpt-5.6-terra@high |
 | refactoring implementation | single | codex:gpt-5.6-luna@high |
-| bug-fix | single | codex:gpt-5.6-sol@max |
-| perf-issue | single | codex:gpt-5.6-sol@max |
-| hillclimb | single | codex:gpt-5.6-sol@max |
-| judgment and prose | single | claude:claude-opus-5@xhigh |
-| hardest tasks | single | claude:claude-fable-5-1@max |
+| bug-fix | single | codex:gpt-6-astra@medium |
+| perf-issue | single | codex:gpt-6-astra@high |
+| hillclimb | single | codex:gpt-6-astra@high |
+| judgment and prose | single | codex:gpt-6-astra@medium |
+| hardest tasks | single | codex:gpt-6-astra@xhigh |
 | how explorer | single | codex:gpt-5.6-luna@medium |
-| how explainer | single | claude:claude-opus-5@xhigh |
-| how critics | panel | codex:gpt-5.6-sol@max, claude:claude-fable-5-1@xhigh |
+| how explainer | single | codex:gpt-6-astra@medium |
+| how critics | panel | codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium |
 | why investigators, synthesizer | panel | inherit-parent |
 | reflect tooling, judgment, divergent, synthesizer | panel | inherit-parent |
-| arena runners | panel | codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
-| arena cross-judge pool | pool | codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
+| arena runners | panel | codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium |
+| arena cross-judge pool | pool | codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium |
 | swarm workers | single | codex:gpt-5.6-luna@high |
-| architect runners | panel | codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh |
-| interrogate reviewers | panel | codex:gpt-5.6-sol@max, claude:claude-fable-5-1@xhigh |
+| architect runners | panel | codex:gpt-6-astra@high, codex:gpt-5.6-sol@high |
+| interrogate reviewers | panel | codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium |
 
-Comparative first-run panels use one model per active provider. Sol represents OpenAI. Fable represents Anthropic for How critics and Interrogate. Opus represents Anthropic for Arena and Architect. Add Grok once when xAI is active. Add another model from the same provider only as an explicit repeated lane. Specialized single roles still use Terra or Luna where their lower-cost profile fits the work.
+Arena, Architect, How critics, and Interrogate run their stored Astra and Sol lanes independently and in order. Their judge pool chooses a model different from the likely base when possible. Panel list length is the only reviewer or candidate count; do not silently deduplicate, add, or omit lanes. Consensus applies only when multiple completed lanes independently agree. Specialized single roles still use Terra or Luna where their lower-cost profile fits the work.
 
 ## Authorization boundary
 
@@ -66,13 +64,13 @@ The top-level harness resolves the route once. A child receives an assigned prov
 | Claude Code | native `Agent` | external runner | external runner |
 | Codex | external runner | native `spawn_agent` | external runner |
 
-`inherit-parent` and `auto` remain aliases. They use the parent's current model and effort through its native subagent primitive. In a panel they still consume one lane, but they reduce provider diversity; say so in the synthesis record. The route resolver has no fallback branch.
+`inherit-parent` and `auto` remain aliases. They use the parent's current model and effort through its native subagent primitive. In a panel they still consume one lane. Under a Claude parent that may be non-OpenAI; this experiment requires a Codex OpenAI parent for OpenAI-only execution. The route resolver has no fallback branch.
 
 ## Native lanes
 
 Native dispatch avoids a second CLI startup and its base context.
 
-- Claude Code: match the descriptor's `(provider, model)` to one model-matrix row, then dispatch it through `pstack-<stem>-<effort>` using that row's Claude-native agent stem and the descriptor's effort. Those definitions pin model, effort, and `background: true`. `pstack-fable-max` and `pstack-opus-xhigh` remain in that set. Pass the complete task, grounding paths, access mode, and unique output location in the `Agent` prompt. Retain the task handle and drain it only after fan-out.
+- Claude Code: active descriptors use the external Codex runner. This package ships no pinned Claude model agents. Generic inherited helpers still use the parent's native `Agent` tool.
 - Codex: call `spawn_agent` with the descriptor's model and `reasoning_effort`, the complete task, grounding paths, access mode, and unique output location. Use an isolated worktree for a writer. Codex subagents already run concurrently.
 
 Do not send a same-provider descriptor to the external runner. It rejects that call because the native route is cheaper and already available.

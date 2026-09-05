@@ -77,6 +77,16 @@ describe("pstack-setup CLI", () => {
     expect(readFileSync(paths.sheet, "utf8")).toBe(beforeSheet);
   });
 
+  it("replays an explicit replacement for a retired sheet row through commit", () => {
+    const paths = fixture();
+    writeFileSync(paths.sheet, "hardest tasks: claude:claude-fable-5-1@max\n");
+    expect(main(prepareArgs(paths, ["hardest tasks=codex:gpt-6-astra@xhigh"]), { stdout: () => {}, stderr: () => {} })).toBe(0);
+    expect(planProbes(paths.plan)).toContain("codex:gpt-6-astra@xhigh");
+    writePassingProbes(paths);
+    expect(main(["commit", "--plan", paths.plan, "--probe-results", paths.probes], { stdout: () => {}, stderr: () => {} })).toBe(0);
+    expect(readFileSync(paths.sheet, "utf8")).toContain("hardest tasks: codex:gpt-6-astra@xhigh");
+  });
+
   it("binds the plan hash to the exact snapshots used for preview", () => {
     const paths = fixture();
     let mutated = false;

@@ -22,6 +22,7 @@ const CODEX_TOOLS_PATH = join(
 );
 const SESSION_START_PATH = join(PLUGIN_ROOT, "hooks/session-start-context.md");
 const AGENTS_DIR = join(PLUGIN_ROOT, "agents");
+const CODEX_PLUGIN_PATH = join(PLUGIN_ROOT, ".codex-plugin/plugin.json");
 const ROUTING_DESIGN_PATH = join(PLUGIN_ROOT, "../../docs/tiered-routing-design.md");
 
 const MATRIX_HEADER = [
@@ -34,7 +35,7 @@ const MATRIX_HEADER = [
   "Claude-native agent stem",
 ] as const;
 
-const FAMILY_ORDER = ["fable", "sol", "terra", "luna", "grok", "opus"] as const;
+const FAMILY_ORDER = ["astra", "sol", "terra", "luna"] as const;
 const PROVIDERS = ["claude", "codex", "grok"] as const;
 const DESCRIPTOR_RE =
   /(claude|codex|grok):[a-z0-9.-]+@(low|medium|high|xhigh|max|ultra)/g;
@@ -122,9 +123,9 @@ function parseModelMatrix(markdown: string): MatrixRow[] {
     .slice(start + 1, end)
     .map((line) => line.trim())
     .filter((line) => line.startsWith("|"));
-  if (table.length !== 8) {
+  if (table.length !== 6) {
     throw new Error(
-      `model matrix must be header, separator, and 6 data rows, got ${table.length}`
+      `model matrix must be header, separator, and 4 data rows, got ${table.length}`
     );
   }
   const header = splitRow(table[0]);
@@ -226,21 +227,23 @@ describe("model matrix", () => {
     expect(
       rows.map((row) => [row.family, row.defaultEffort])
     ).toEqual([
-      ["fable", "max"],
-      ["sol", "max"],
+      ["astra", "medium"],
+      ["sol", "medium"],
       ["terra", "high"],
       ["luna", "high"],
-      ["grok", "xhigh"],
-      ["opus", "xhigh"],
     ]);
-    expect(rows.find((row) => row.family === "fable")?.model).toBe("claude-fable-5-1");
+    expect(rows.find((row) => row.family === "astra")?.model).toBe("gpt-6-astra");
     const documentedEfforts = rows.map((row) => [
       `${row.provider}:${row.model}`,
       row.selectableEfforts,
     ] as const).sort(([left], [right]) => left.localeCompare(right));
-    const runnerEfforts = Object.entries(MODEL_EFFORTS)
+    const activeRunnerEfforts = Object.entries(MODEL_EFFORTS)
+      .filter(([descriptor]) => documentedEfforts.some(([active]) => active === descriptor))
       .sort(([left], [right]) => left.localeCompare(right));
-    expect(JSON.stringify(documentedEfforts)).toBe(JSON.stringify(runnerEfforts));
+    expect(JSON.stringify(documentedEfforts)).toBe(JSON.stringify(activeRunnerEfforts));
+    expect(MODEL_EFFORTS["claude:claude-fable-5-1"]).toBeDefined();
+    expect(MODEL_EFFORTS["claude:claude-opus-5"]).toBeDefined();
+    expect(MODEL_EFFORTS["grok:grok-4.6"]).toBeDefined();
   });
 
   it("ships exactly the declared Claude-native frontier agents", () => {
@@ -311,11 +314,11 @@ describe("model matrix", () => {
       expect(row.selectableEfforts).toContain(asEffort(effort));
     }
     const expectedPanels = new Map([
-      ["how critics", "codex:gpt-5.6-sol@max, claude:claude-fable-5-1@xhigh"],
-      ["arena runners", "codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
-      ["arena cross-judge pool", "codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
-      ["architect runners", "codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh"],
-      ["interrogate reviewers", "codex:gpt-5.6-sol@max, claude:claude-fable-5-1@xhigh"],
+      ["how critics", "codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium"],
+      ["arena runners", "codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium"],
+      ["arena cross-judge pool", "codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium"],
+      ["architect runners", "codex:gpt-6-astra@high, codex:gpt-5.6-sol@high"],
+      ["interrogate reviewers", "codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium"],
     ]);
     for (const role of PANEL_ROLES) {
       const line = sheet
@@ -353,13 +356,15 @@ describe("model matrix", () => {
     ].join("\n"));
     const swarm = readFileSync(join(PLUGIN_ROOT, "skills/swarm/SKILL.md"), "utf8");
     expect(swarm).toContain(`Otherwise use ${consumer("swarm workers")[0]}.`);
+    const potetoMode = readFileSync(POTETO_MODE_PATH, "utf8");
+    expect(potetoMode).toContain("that list alone sets their count");
+    expect(potetoMode).not.toContain("begin with one Astra reviewer");
+    const codexPlugin = readFileSync(CODEX_PLUGIN_PATH, "utf8");
+    expect(codexPlugin).toContain("configured adversarial review that runs every configured reviewer lane");
+    expect(codexPlugin).not.toContain("defaults to one reviewer");
     const reference = readFileSync(join(PLUGIN_ROOT, "../../docs/reference.md"), "utf8");
-    expect(reference).toContain(
-      `Initial Arena and Architect panels use ${consumer("arena runners").join(", ")}, one model per active provider. How critics and Interrogate use ${consumer("how critics").join(", ")}.`
-    );
-    expect(reference).toContain(
-      "Arena and Architect use one Sol lane and one Opus lane, one model per active provider."
-    );
+    expect(reference).toContain("Arena, Architect, How critics, and Interrogate run every stored lane in order.");
+    expect(reference).toContain("The stored list length is the only candidate or reviewer count");
     const design = readFileSync(ROUTING_DESIGN_PATH, "utf8");
     expect(design).toContain(`hardest tasks: ${consumer("hardest tasks")[0].slice(1, -1)}`);
     expect(design).toContain(`how critics: ${consumer("how critics").map((lane) => lane.slice(1, -1)).join(", ")}`);
@@ -380,19 +385,18 @@ describe("model matrix", () => {
     expect(setup).toContain("Every documented role remains present.");
     expect(setup).toContain("<!-- pstack:models:begin -->");
     expect(setup).toContain("<!-- pstack:models:end -->");
+    expect(setup).not.toContain("one configured reviewer");
   });
 
-  it("binds Claude-native dispatch to the matrix mapping", () => {
+  it("routes active models externally from a Claude parent without pinned Claude agents", () => {
     const dispatch = readFileSync(DISPATCH_PATH, "utf8");
     const nativeStart = dispatch.indexOf("## Native lanes");
     const externalStart = dispatch.indexOf("## External lanes");
     expect(nativeStart).toBeGreaterThan(-1);
     expect(externalStart).toBeGreaterThan(nativeStart);
     const nativeLanes = dispatch.slice(nativeStart, externalStart);
-    expect(nativeLanes).toContain(
-      "match the descriptor's `(provider, model)` to one model-matrix row"
-    );
-    expect(nativeLanes).toContain("`pstack-<stem>-<effort>`");
+    expect(nativeLanes).toContain("active descriptors use the external Codex runner");
+    expect(nativeLanes).toContain("ships no pinned Claude model agents");
   });
 
   it("documents the scoped Codex exception for macOS Keychain authentication", () => {

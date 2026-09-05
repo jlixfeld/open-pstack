@@ -93,7 +93,7 @@ describe("prepare setup", () => {
     const { value } = prepared();
     expect(value.preview[0]).toBe("feature implementation [1]: codex:gpt-5.6-terra@high (native)");
     expect(value.preview.some((line) => line.includes("arena cross-judge pool [1]"))).toBe(true);
-    expect(value.probes.map((probe) => `${probe.provider}:${probe.model}@${probe.effort}`)).toContain("claude:claude-fable-5-1@max");
+    expect(value.probes.map((probe) => `${probe.provider}:${probe.model}@${probe.effort}`)).toContain("codex:gpt-6-astra@xhigh");
     expect(value.targets[0].nextBytes).not.toEqual(value.targets[0].bytes);
   });
 
@@ -106,7 +106,7 @@ describe("prepare setup", () => {
   it("does not accept a successful result for a different descriptor", () => {
     const { fs, value } = prepared();
     const results = passed(value);
-    results[0] = { descriptor: "codex:gpt-5.6-sol@max", passed: true };
+    results[0] = { descriptor: "codex:gpt-6-astra@high", passed: true };
     expect(() => commitSetup(value, results, fs)).toThrow("all final-map probes");
     expect(fs.writes).toEqual([]);
   });
