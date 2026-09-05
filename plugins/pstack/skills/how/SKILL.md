@@ -12,7 +12,7 @@ Explore the codebase to answer "how does X work?" questions. Produce clear archi
 Two modes:
 
 1. **Explain** (default). Explore the codebase and produce a clear explanation
-2. **Critique.** Explain first, then spawn multiple models to independently identify architectural issues
+2. **Critique.** Explain first, then run the configured architectural critic lanes
 
 ## Explain Mode
 
@@ -59,7 +59,7 @@ Then proceed to Step 3.
 
 ### Step 2b. Direct Explain (simple questions)
 
-Dispatch one read-only lane that explores and explains in one pass using your configured how-explainer descriptor (default `claude:claude-opus-5@xhigh`).
+Dispatch one read-only lane that explores and explains in one pass using your configured how-explainer descriptor (default `codex:gpt-6-astra@medium`).
 
 The agent does its own exploration (Glob, Grep, Read) and writes the explanation directly. Read `references/explainer-prompt.md` for the communication style and output format. Same structure, just no explorer findings as input.
 
@@ -67,7 +67,7 @@ Proceed to Step 4.
 
 ### Step 3. Synthesize (complex questions only)
 
-Once all explorers return, dispatch one read-only lane to synthesize their findings into one coherent explanation using your configured how-explainer descriptor (default `claude:claude-opus-5@xhigh`).
+Once all explorers return, dispatch one read-only lane to synthesize their findings into one coherent explanation using your configured how-explainer descriptor (default `codex:gpt-6-astra@medium`).
 
 The explainer gets all explorers' findings and writes the human-facing explanation (output format below). Read `references/explainer-prompt.md` for the full prompt template. The explainer reconciles overlapping findings, resolves contradictions, and weaves the slices into a unified picture.
 
@@ -99,9 +99,9 @@ Run the full explain flow above (Steps 1-4). You must understand the architectur
 
 ### Step 2. Spawn Critics
 
-After the explanation is complete, start one architectural critic per descriptor in your configured how-critics list (defaults `codex:gpt-5.6-sol@max`, `claude:claude-fable-5-1@xhigh`) in one fan-out phase.
+After the explanation is complete, start one architectural critic per descriptor in your configured how-critics list (defaults `codex:gpt-6-astra@medium`, `codex:gpt-5.6-sol@medium`) in one fan-out phase. The configured list is the complete critic count; consensus requires multiple completed lanes.
 
-Route each critic descriptor in `read-only` mode. These are minimum reasoning levels. The lead may raise effort within the same current-frontier model when the architecture warrants it, but must not substitute providers silently.
+Route each critic descriptor in `read-only` mode. Use its configured effort without dynamic escalation or provider substitution.
 
 Read `references/critic-prompt.md` for the prompt template. Each critic gets:
 1. The explanation from Step 1 (so they don't re-explore)

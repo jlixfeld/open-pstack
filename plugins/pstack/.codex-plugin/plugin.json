@@ -21,7 +21,7 @@
   "interface": {
     "displayName": "pstack",
     "shortDescription": "Rigorous, parallelizable agent workflows: go deep first, write less, verify everything",
-    "longDescription": "pstack guides agent work through poteto-mode's principles, parallel design exploration (architect/arena), adversarial multi-model review (interrogate), root-cause debugging, prose deslopping, and verified delivery. Skills are shared with the Claude Code build; on Codex, tool names resolve via the codex-tools mapping.",
+    "longDescription": "pstack guides agent work through poteto-mode's principles, parallel design exploration (architect/arena), configured adversarial review that runs every configured reviewer lane, root-cause debugging, prose deslopping, and verified delivery. Skills are shared with the Claude Code build; on Codex, tool names resolve via the codex-tools mapping.",
     "developerName": "Lauren Tan (original), open-pstack maintainers",
     "category": "Developer Tools",
     "capabilities": [
@@ -31,7 +31,7 @@
     ],
     "defaultPrompt": [
       "Work on this in poteto-mode.",
-      "Interrogate this diff with multiple models."
+      "Interrogate this diff with the configured reviewers."
     ],
     "websiteURL": "https://github.com/jlixfeld/open-pstack",
     "brandColor": "#7C3AED"

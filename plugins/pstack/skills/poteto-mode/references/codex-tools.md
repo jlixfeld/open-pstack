@@ -41,7 +41,7 @@ poteto-mode's Subagents section sets Claude-specific defaults (`subagent_type: "
 
 ## Models and providers
 
-Do not replace every configured entry with a Codex model. `/setup-pstack` writes portable descriptors such as `claude:claude-opus-5@xhigh`, `codex:gpt-5.6-terra@high`, and `grok:grok-4.6@xhigh`. In a Codex parent, only `codex:*` is native. Route Claude and Grok descriptors through the external launcher exactly as `provider-dispatch.md` specifies. The active map may omit Fable or Grok; panels retain their configured order and the cross-judge uses its pool.
+This experimental active map writes OpenAI descriptors such as `codex:gpt-6-astra@medium`, `codex:gpt-6-astra@high`, and `codex:gpt-5.6-terra@high`. In a Codex parent they are native. A Claude parent runs them through the external launcher. The runner still accepts immutable legacy Claude and Grok lanes, but setup does not add them to the active map. Panels retain their configured order and the cross-judge uses its pool.
 
 ## Claude built-in skills pstack references
 

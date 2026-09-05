@@ -21,15 +21,15 @@ function options(overrides: Partial<RunnerOptions> = {}): RunnerOptions {
 
 describe("invocationCommand", () => {
   it("pins Codex model, effort, sandbox, cwd, and JSONL output", () => {
-    const spec = invocationCommand(options());
+    const spec = invocationCommand(options({ model: "gpt-6-astra", effort: "high" }));
     expect(spec.command).toBe("codex");
     expect(spec.stdin).toBe("prompt");
     expect(spec.args).toEqual([
       "exec",
       "--model",
-      "gpt-5.6-sol",
+      "gpt-6-astra",
       "--config",
-      'model_reasoning_effort="max"',
+      'model_reasoning_effort="high"',
       "--sandbox",
       "read-only",
       "--cd",
@@ -156,7 +156,7 @@ describe("invocationCommand", () => {
       },
       {
         provider: "codex" as const,
-        model: "gpt-5.6-sol",
+        model: "gpt-6-astra",
         flag: (effort: "low" | "medium" | "high") => [
           "--config",
           `model_reasoning_effort="${effort}"`,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { resolveRoute } from "./dispatch.ts";
 import { parseManifest } from "./manifest.ts";
-import { defaultRoleMap, parseLane, parseRoleMap, probePlan, renderLane } from "./role-map.ts";
+import { defaultRoleMap, parseLane, parseRoleMap, probePlan, renderLane, type RoleAssignment } from "./role-map.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -9,44 +9,52 @@ const dispatch = readFileSync(join(import.meta.dir, "../../references/provider-d
 const manifest = parseManifest(dispatch);
 
 describe("routing manifest", () => {
-  it("recognizes every supported family and family-specific efforts", () => {
-    expect(manifest.families.map((family) => family.family)).toEqual(["fable", "sol", "terra", "luna", "grok", "opus"]);
+  it("recognizes the active OpenAI families and family-specific efforts", () => {
+    expect(manifest.families.map((family) => family.family)).toEqual(["astra", "sol", "terra", "luna"]);
     for (const valid of [
-      "claude:claude-fable-5-1@max",
+      "codex:gpt-6-astra@xhigh",
       "codex:gpt-5.6-sol@ultra",
       "codex:gpt-5.6-terra@ultra",
       "codex:gpt-5.6-luna@max",
-      "grok:grok-4.6@xhigh",
-      "claude:claude-opus-5@xhigh",
     ]) expect(parseLane(valid, manifest)).toBeDefined();
     for (const invalid of [
+      "codex:gpt-6-astra@ultra",
       "claude:gpt-5.6-sol@max",
-      "codex:claude-fable-5-1@max",
       "codex:gpt-5.6-luna@ultra",
-      "grok:grok-4.6@ultra",
+      "claude:claude-fable-5-1@max",
       "codex:gpt-5.6-missing@max",
-      "grok:grok-4.6@invalid",
     ]) {
       expect(() => parseLane(invalid, manifest)).toThrow();
     }
   });
 
-  it("uses the exact split first-run map without requiring optional families", () => {
+  it("uses the exact OpenAI-only first-run map", () => {
     const roles = defaultRoleMap(manifest);
     expect(roles.map((role) => role.role).slice(0, 2)).toEqual(["feature implementation", "refactoring implementation"]);
     expect(roles.find((role) => role.role === "feature implementation")?.lanes.map(renderLane)).toEqual(["codex:gpt-5.6-terra@high"]);
     expect(roles.find((role) => role.role === "refactoring implementation")?.lanes.map(renderLane)).toEqual(["codex:gpt-5.6-luna@high"]);
-    expect(probePlan(roles).map(renderLane)).toContain("claude:claude-fable-5-1@max");
-    expect(probePlan(roles).map(renderLane)).not.toContain("grok:grok-4.6@xhigh");
-    for (const roleName of ["how critics", "arena runners", "architect runners", "interrogate reviewers"]) {
+    expect(probePlan(roles).map(renderLane)).toEqual(expect.arrayContaining([
+      "codex:gpt-6-astra@high", "codex:gpt-6-astra@medium", "codex:gpt-6-astra@xhigh",
+      "codex:gpt-5.6-sol@high", "codex:gpt-5.6-sol@medium", "codex:gpt-5.6-terra@high", "codex:gpt-5.6-luna@high", "codex:gpt-5.6-luna@medium",
+    ]));
+    expect(probePlan(roles).every((lane) => lane.provider === "codex")).toBe(true);
+    expect(probePlan(roles).some((lane) => lane.effort === "max" || lane.effort === "ultra")).toBe(false);
+    const expectedPanels = new Map([
+      ["how critics", ["codex:gpt-6-astra@medium", "codex:gpt-5.6-sol@medium"]],
+      ["arena runners", ["codex:gpt-6-astra@medium", "codex:gpt-5.6-sol@medium"]],
+      ["arena cross-judge pool", ["codex:gpt-6-astra@medium", "codex:gpt-5.6-sol@medium"]],
+      ["architect runners", ["codex:gpt-6-astra@high", "codex:gpt-5.6-sol@high"]],
+      ["interrogate reviewers", ["codex:gpt-6-astra@medium", "codex:gpt-5.6-sol@medium"]],
+    ]);
+    for (const [roleName, expected] of expectedPanels) {
       const lanes = roles.find((role) => role.role === roleName)?.lanes ?? [];
-      expect(lanes.map(renderLane)).toEqual(roleName === "how critics" || roleName === "interrogate reviewers"
-        ? ["codex:gpt-5.6-sol@max", "claude:claude-fable-5-1@xhigh"]
-        : ["codex:gpt-5.6-sol@max", "claude:claude-opus-5@xhigh"]);
-      expect(new Set(lanes.map((lane) => renderLane(lane).split(":", 1)[0])).size).toBe(lanes.length);
+      expect(lanes.map(renderLane)).toEqual(expected);
     }
+    expect(roles.find((role) => role.role === "bug-fix")?.lanes.map(renderLane)).toEqual([
+      "codex:gpt-6-astra@medium",
+    ]);
     expect(roles.find((role) => role.role === "hardest tasks")?.lanes.map(renderLane)).toEqual([
-      "claude:claude-fable-5-1@max",
+      "codex:gpt-6-astra@xhigh",
     ]);
   });
 
@@ -69,16 +77,53 @@ describe("routing manifest", () => {
     ].join("\n"), manifest)).toThrow("unknown role: unknown role");
   });
 
+  it("replaces an explicit retired source row while validating its structure", () => {
+    const edit: RoleAssignment = { role: "hardest tasks", lanes: [parseLane("codex:gpt-6-astra@xhigh", manifest)] };
+    expect(parseRoleMap("hardest tasks: claude:claude-fable-5-1@max\n", manifest, [edit])
+      .find((role) => role.role === "hardest tasks")?.lanes.map(renderLane)).toEqual(["codex:gpt-6-astra@xhigh"]);
+    expect(() => parseRoleMap("hardest tasks: claude:claude-fable-5-1@max\n", manifest)).toThrow("unknown descriptor family");
+    expect(() => parseRoleMap("hardest tasks: malformed\n", manifest, [edit])).toThrow("invalid descriptor");
+    expect(() => parseRoleMap("hardest tasks: claude:claude-fable-5-1@max, codex:gpt-6-astra@high\n", manifest, [edit])).toThrow("must have exactly one lane");
+  });
+
+  it("rejects malformed retired model slugs even when an explicit edit replaces them", () => {
+    const edit: RoleAssignment = { role: "hardest tasks", lanes: [parseLane("codex:gpt-6-astra@xhigh", manifest)] };
+    for (const malformed of ["claude fable-5-1", "claude:fable-5-1", "claude-fable-5-1?"]) {
+      expect(() => parseRoleMap(`hardest tasks: claude:${malformed}@max\n`, manifest, [edit]))
+        .toThrow("invalid descriptor");
+    }
+  });
+
+  it("rejects invalid source identities even when edits replace them", () => {
+    const edit: RoleAssignment = { role: "hardest tasks", lanes: [parseLane("codex:gpt-6-astra@xhigh", manifest)] };
+    const featureEdit: RoleAssignment = { role: "feature implementation", lanes: [parseLane("codex:gpt-5.6-terra@high", manifest)] };
+    const refactoringEdit: RoleAssignment = { role: "refactoring implementation", lanes: [parseLane("codex:gpt-5.6-luna@high", manifest)] };
+    expect(() => parseRoleMap("unknown role: claude:claude-fable-5-1@max\n", manifest, [edit])).toThrow("unknown role");
+    expect(() => parseRoleMap("hardest tasks: claude:claude-fable-5-1@max\nhardest tasks: claude:claude-fable-5-1@max\n", manifest, [edit])).toThrow("duplicate role");
+    expect(() => parseRoleMap("feature, refactoring: claude:claude-fable-5-1@max\nfeature implementation: codex:gpt-6-astra@high\n", manifest, [edit, featureEdit, refactoringEdit])).toThrow("duplicate role");
+    expect(() => parseRoleMap("hardest tasks:claude:claude-fable-5-1@max\n", manifest, [edit])).toThrow("invalid role row");
+    expect(() => parseRoleMap("", manifest, [edit, edit])).toThrow("duplicate role edit");
+  });
+
+  it("keeps untouched custom rows and rejects an unedited retired model", () => {
+    const edit: RoleAssignment = { role: "hardest tasks", lanes: [parseLane("codex:gpt-6-astra@xhigh", manifest)] };
+    const sheet = "hardest tasks: claude:claude-fable-5-1@max\nhow critics: codex:gpt-5.6-sol@medium, codex:gpt-5.6-sol@medium\n";
+    expect(parseRoleMap(sheet, manifest, [edit]).find((role) => role.role === "how critics")?.lanes.map(renderLane))
+      .toEqual(["codex:gpt-5.6-sol@medium", "codex:gpt-5.6-sol@medium"]);
+    expect(() => parseRoleMap(`${sheet}how explainer: claude:claude-opus-5@xhigh\n`, manifest, [edit]))
+      .toThrow("unknown descriptor family");
+  });
+
   it("preserves panel lane order and duplicates while keeping a pool distinct", () => {
     const roles = parseRoleMap([
-      "how critics: codex:gpt-5.6-sol@max, codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh",
-      "arena cross-judge pool: codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh",
+      "how critics: codex:gpt-5.6-sol@high, codex:gpt-5.6-sol@high, codex:gpt-6-astra@high",
+      "arena cross-judge pool: codex:gpt-5.6-sol@high, codex:gpt-6-astra@high",
     ].join("\n"), manifest);
     expect(roles.find((role) => role.role === "how critics")?.lanes.map(renderLane)).toEqual([
-      "codex:gpt-5.6-sol@max", "codex:gpt-5.6-sol@max", "claude:claude-opus-5@xhigh",
+      "codex:gpt-5.6-sol@high", "codex:gpt-5.6-sol@high", "codex:gpt-6-astra@high",
     ]);
     expect(manifest.roles.find((role) => role.name === "arena cross-judge pool")?.shape).toBe("pool");
-    expect(probePlan(roles).filter((lane) => renderLane(lane) === "codex:gpt-5.6-sol@max")).toHaveLength(1);
+    expect(probePlan(roles).filter((lane) => renderLane(lane) === "codex:gpt-5.6-sol@high")).toHaveLength(1);
   });
 });
 

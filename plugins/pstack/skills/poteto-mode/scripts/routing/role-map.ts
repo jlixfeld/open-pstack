@@ -15,19 +15,13 @@ export interface RoleAssignment {
 }
 
 export const ROLE_MAP_PREAMBLE = "Provider-qualified per-role choices. Read the installed pstack provider-dispatch reference before dispatching a configured role. Confirming this model sheet is standing authorization to send a pstack role's assigned source code and task context to every selected provider; do not request separate source-code egress approval for a role selected from this confirmed sheet. Every documented role remains present. `inherit-parent` and `auto` use the parent model natively and still count as one stored lane.";
+const MODEL_SLUG = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
 
 export function parseLane(value: string, manifest: Manifest): Lane {
-  const trimmed = value.trim();
-  if (trimmed === "inherit-parent" || trimmed === "auto") return trimmed;
-  const match = /^([^:]+):([^@]+)@([^@]+)$/.exec(trimmed);
-  if (match === null) throw new Error(`invalid descriptor: ${value}`);
-  const parsed = {
-    provider: oneOf(match[1], PROVIDERS, "provider") as Provider,
-    model: match[2],
-    effort: oneOf(match[3], EFFORTS, "effort") as Effort,
-  };
+  const parsed = parseLaneSyntax(value);
+  if (typeof parsed === "string") return parsed;
   const family = manifest.families.find((entry) => entry.provider === parsed.provider && entry.model === parsed.model);
-  if (family === undefined) throw new Error(`unknown descriptor family: ${trimmed}`);
+  if (family === undefined) throw new Error(`unknown descriptor family: ${value.trim()}`);
   if (!family.efforts.includes(parsed.effort)) throw new Error(`invalid effort for ${parsed.provider}:${parsed.model}: ${parsed.effort}`);
   return parsed;
 }
@@ -48,12 +42,37 @@ function validateAssignment(assignment: RoleAssignment, manifest: Manifest): Rol
 function sheetRows(sheet: string): readonly { readonly role: string; readonly lanes: string }[] {
   const rows: { role: string; lanes: string }[] = [];
   for (const line of sheet.split(/\r?\n/)) {
-    if (line.startsWith("#") || !line.includes(": ")) continue;
-    const delimiter = line.indexOf(": ");
-    const role = line.slice(0, delimiter).trim();
-    rows.push({ role, lanes: line.slice(delimiter + 2).trim() });
+    const trimmed = line.trim();
+    if (trimmed.length === 0 || trimmed.startsWith("#") || !trimmed.includes(":")) continue;
+    const delimiter = trimmed.indexOf(":");
+    if (trimmed.slice(delimiter, delimiter + 2) !== ": ") throw new Error(`invalid role row: ${line}`);
+    rows.push({ role: trimmed.slice(0, delimiter).trim(), lanes: trimmed.slice(delimiter + 2).trim() });
   }
   return rows;
+}
+
+function parseLaneSyntax(value: string): Lane {
+  const trimmed = value.trim();
+  if (trimmed === "inherit-parent" || trimmed === "auto") return trimmed;
+  const match = /^([^:]+):([^@]+)@([^@]+)$/.exec(trimmed);
+  if (match === null || !MODEL_SLUG.test(match[2])) throw new Error(`invalid descriptor: ${value}`);
+  return {
+    provider: oneOf(match[1], PROVIDERS, "provider"),
+    model: match[2],
+    effort: oneOf(match[3], EFFORTS, "effort"),
+  };
+}
+
+function indexEdits(edits: readonly RoleAssignment[], manifest: Manifest): ReadonlyMap<string, RoleAssignment> {
+  const indexed = new Map<string, RoleAssignment>();
+  for (const edit of edits) {
+    if (indexed.has(edit.role)) throw new Error(`duplicate role edit: ${edit.role}`);
+    indexed.set(edit.role, validateAssignment({
+      role: edit.role,
+      lanes: edit.lanes.map((lane) => parseLane(renderLane(lane), manifest)),
+    }, manifest));
+  }
+  return indexed;
 }
 
 export function defaultRoleMap(manifest: Manifest): readonly RoleAssignment[] {
@@ -63,7 +82,8 @@ export function defaultRoleMap(manifest: Manifest): readonly RoleAssignment[] {
   }, manifest));
 }
 
-export function parseRoleMap(sheet: string, manifest: Manifest): readonly RoleAssignment[] {
+export function parseRoleMap(sheet: string, manifest: Manifest, edits: readonly RoleAssignment[] = []): readonly RoleAssignment[] {
+  const editMap = indexEdits(edits, manifest);
   const rows = sheetRows(sheet);
   const assignments: RoleAssignment[] = [];
   const seen = new Set<string>();
@@ -73,27 +93,17 @@ export function parseRoleMap(sheet: string, manifest: Manifest): readonly RoleAs
     for (const name of names) {
       if (seen.has(name)) throw new Error(`duplicate role: ${name}`);
       seen.add(name);
+      roleDefinition(manifest, name);
       assignments.push(validateAssignment({
         role: name,
-        lanes: row.lanes.split(",").map((lane) => parseLane(lane, manifest)),
+        lanes: row.lanes.split(",").map((lane) => editMap.has(name)
+          ? parseLaneSyntax(lane)
+          : parseLane(lane, manifest)),
       }, manifest));
     }
   }
   const byRole = new Map(assignments.map((assignment) => [assignment.role, assignment]));
-  return defaultRoleMap(manifest).map((assignment) => byRole.get(assignment.role) ?? assignment);
-}
-
-export function applyRoleEdits(current: readonly RoleAssignment[], edits: readonly RoleAssignment[], manifest: Manifest): readonly RoleAssignment[] {
-  const editMap = new Map<string, RoleAssignment>();
-  for (const edit of edits) {
-    const parsed = {
-      role: edit.role,
-      lanes: edit.lanes.map((lane) => parseLane(renderLane(lane), manifest)),
-    };
-    if (editMap.has(parsed.role)) throw new Error(`duplicate role edit: ${parsed.role}`);
-    editMap.set(parsed.role, validateAssignment(parsed, manifest));
-  }
-  return current.map((assignment) => editMap.get(assignment.role) ?? assignment);
+  return defaultRoleMap(manifest).map((assignment) => editMap.get(assignment.role) ?? byRole.get(assignment.role) ?? assignment);
 }
 
 export function renderLane(lane: Lane): string {

@@ -1,11 +1,11 @@
 ---
 name: interrogate
-description: "Use for \"interrogate\", \"adversarial review\", \"multi-model review\", \"challenge this\", \"stress test this code\", \"find blind spots\", or \"tear this apart\". Multiple LLM reviewers challenge changes from independent angles."
+description: "Use for \"interrogate\", \"adversarial review\", \"challenge this\", \"stress test this code\", \"find blind spots\", or \"tear this apart\". Configured reviewers challenge changes from independent angles when more than one lane is configured."
 ---
 
 # Interrogate
 
-Spawn one reviewer per configured model to adversarially review code changes. Each model gets the same prompt and rubric. The adversarial signal comes from model diversity, not assigned personas. Models differ in blind spots, priors, and reasoning patterns. Agreement across models is high-confidence signal; lone-model findings are worth reading but lower confidence.
+Run every reviewer in the configured list. The defaults are Astra and Sol at medium effort. Every reviewer receives the same prompt and rubric. Assess findings against concrete code paths and evidence; consensus requires multiple completed reviewers.
 
 The deliverable is a synthesized verdict. Do NOT auto-apply changes.
 
@@ -38,10 +38,10 @@ Start all reviewers in one fan-out phase. Use `interrogate reviewers` from the c
 
 | Subagent | Default model |
 |----------|---------------|
-| Reviewer A | `codex:gpt-5.6-sol@max` |
-| Reviewer B | `claude:claude-fable-5-1@xhigh` |
+| Reviewer A | `codex:gpt-6-astra@medium` |
+| Reviewer B | `codex:gpt-5.6-sol@medium` |
 
-For each reviewer, route the configured descriptor with `read-only` access and a unique output/receipt path. If the descriptor is `inherit-parent` or `auto`, use the parent subagent primitive without a model override. If a provider, login, or model is unavailable, record a dropout and continue with the completed reviewers. Exit 75 with a `provider-paused` receipt is not a dropout: preserve that reviewer lane and keep synthesis incomplete under the provider-dispatch pause contract. Never pick the closest model or silently fall back; that destroys the meaning of cross-provider agreement.
+For each reviewer, route the configured descriptor with `read-only` access and a unique output/receipt path. If the descriptor is `inherit-parent` or `auto`, use the parent subagent primitive without a model override. If a provider, login, or model is unavailable, record a dropout and continue with the completed reviewers. Exit 75 with a `provider-paused` receipt is not a dropout: preserve that reviewer lane and keep synthesis incomplete under the provider-dispatch pause contract. Never pick the closest model or silently fall back; that changes the configured review contract.
 
 Read `references/reviewer-prompt.md` and fill in the template with:
 1. The stated intent
@@ -58,8 +58,8 @@ Each reviewer produces structured findings as described in the prompt template.
 As results come back, build a unified picture:
 
 1. **Parse all findings** from the reviewers
-2. **Identify consensus**. Findings raised by 2+ models independently are highest signal.
-3. **Identify lone-model findings**. Still worth reading, but weight accordingly.
+2. **Identify consensus when multiple reviewers ran**. Findings raised by 2+ models independently are highest signal.
+3. **Identify single-review findings**. They are one reviewer's judgment, so do not present them as consensus.
 4. **Deduplicate**. Different models may describe the same issue differently. Merge these and note which models raised it.
 5. **Note disagreements**. If one model flags something and another explicitly says the opposite, that's useful context for the verdict.
 
@@ -104,4 +104,4 @@ Present the verdict in this structure:
 [Rejected findings with brief rationale. This shows the user what was filtered out and why, so they can override your judgment if they disagree.]
 
 ### Agreement Map
-[Where did models agree, where did they diverge, and what does the pattern of agreement/disagreement tell us?]
+[When multiple reviewers ran, where did they agree or diverge? With one reviewer, say that no agreement comparison was available.]

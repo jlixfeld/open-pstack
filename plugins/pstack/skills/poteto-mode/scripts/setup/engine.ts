@@ -1,8 +1,6 @@
 import { resolveRoute, type Parent } from "../routing/dispatch.ts";
 import { parseManifest, type Manifest } from "../routing/manifest.ts";
 import {
-  applyRoleEdits,
-  defaultRoleMap,
   parseRoleMap,
   probePlan,
   renderLane,
@@ -86,8 +84,7 @@ function preview(parent: Parent, roles: readonly RoleAssignment[]): readonly str
 
 export function prepareSetup(input: PrepareInput): PreparedSetup {
   const manifest = parseManifest(input.manifestMarkdown);
-  const current = input.sheet.bytes === null ? defaultRoleMap(manifest) : parseRoleMap(text(input.sheet.bytes) ?? "", manifest);
-  const roles = applyRoleEdits(current, input.edits ?? [], manifest);
+  const roles = parseRoleMap(text(input.sheet.bytes) ?? "", manifest, input.edits ?? []);
   const sheetText = renderRoleMap(roles);
   const integrationText = integration(
     input.parent,

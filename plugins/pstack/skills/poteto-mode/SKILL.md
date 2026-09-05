@@ -20,7 +20,7 @@ Remaining triggers:
 - Any code → name the data shape first, and choose its organizing structure per **principle-model-the-domain**.
 - Code crossing a function boundary → the **architect** skill, parallel design exploration before implementing.
 - Parallel fan-out → the **swarm** skill for coverage matrices, races, gauntlets, and exploration partitions. Use **arena** for design or code bakeoffs with base selection and grafting.
-- Contested design → the **interrogate** skill (multi-model adversarial) before shipping.
+- Contested design → the **interrogate** skill (configured adversarial review) before shipping.
 - Nontrivial multi-step → write the throughput checkpoint (Feature step 3).
 - Any prose surface → the **unslop** skill. Your reply is a prose surface; write it per **Writing the reply**. Agent-facing prose also follows the **plugin-dev:skill-development** skill (Claude Code's authoring guidance for SKILL.md files).
 - Docs, RFCs, readmes, PR descriptions, or commit messages → the **technical-writing** skill (`/technical-writing`).
@@ -87,7 +87,7 @@ Read the leaf skill in full for any principle you apply. Each entry names when i
 
 For `inherit-parent`, `auto`, or an unconfigured native ad-hoc helper, prefer `poteto-agent`. `/poteto-mode` and `poteto-agent` route through the same wrapper. A provider-qualified role instead follows provider dispatch: Claude's shipped frontier agent definitions pin native model and effort, Codex passes both to `spawn_agent`, and cross-parent providers run through the deterministic launcher. Routed workflow skills set the task and access mode; do not override their choices.
 
-**Defaults for every delegation.** Start independent lanes together, use file pointers rather than inlined dumps, preserve only the tools or MCPs the task needs, and assign every writer a worktree or unique output directory. `/setup-pstack` configures the descriptor per role. First-run roles send feature implementation to Terra high, refactoring and swarm work to Luna high, bug fixes/performance/hillclimbing to Sol max, hardest tasks to Fable max, and judgment/prose to Opus xhigh. Panels preserve the lanes and order in the routing registry; an arena cross-judge is a pool, not a fan-out. `inherit-parent` and `auto` use the parent model natively and reduce provider diversity when used in a panel.
+**Defaults for every delegation.** Start independent lanes together, use file pointers rather than inlined dumps, preserve only the tools or MCPs the task needs, and assign every writer a worktree or unique output directory. `/setup-pstack` configures the descriptor per role. The experimental first-run map sends feature implementation to Terra high, refactoring and swarm work to Luna high, bug fixes, judgment/prose, and broad review to Astra medium, coupled performance and hillclimb work to Astra high, and the hardest tasks to Astra xhigh. Arena, Architect, How critics, and Interrogate run every stored Astra and Sol lane in order; that list alone sets their count, and consensus requires multiple completed lanes. `inherit-parent` and `auto` use the parent model natively, so OpenAI-only execution requires a Codex OpenAI parent.
 
 You own every subagent's work. Review the diff and write your own summary, don't pass through what it said. Interrupt-chained resumes silently drop directives, so fire a fresh subagent with consolidated scope rather than trusting a "done" summary. A second opinion is the same prompt against a different model. Agreement is high-signal.
 

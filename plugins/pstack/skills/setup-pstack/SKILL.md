@@ -73,7 +73,7 @@ The active sheet and parent integration file must be regular files or absent. Re
 
 Read the model matrix. Every non-alias value must match `<provider>:<model>@<effort>`, map to exactly one matrix family by `(provider, model)`, and use an effort from that family's Selectable efforts cell. `inherit-parent` and `auto` carry no descriptor. Sol and Terra allow `ultra`; Luna does not.
 
-An unmatched provider/model, out-of-domain effort, duplicate role, unknown role, or invalid single-role cardinality is inconsistent state. Stop, show the conflicting rows verbatim, and ask for an explicit replacement. Different roles may intentionally use different efforts from the same family; preserve those exact descriptors. Do not probe or write while any inconsistency is unresolved.
+An old sheet may name a retired model. Replace that role only through an explicit named edit; every untouched role must validate against the active matrix. The source row must still have valid descriptor syntax, provider and effort tokens, role identity, and cardinality. Edits never hide duplicate or unknown roles. If any inconsistency remains, show the conflicting rows and request its correction. Do not probe or write while any inconsistency is unresolved. Different roles may intentionally use different efforts from the same family; preserve their exact descriptors.
 
 ### 4. Apply named role edits
 
@@ -85,7 +85,7 @@ Render the complete final map in memory, then derive one probe for each distinct
 
 Use a tiny read-only probe that returns a unique marker. Claude descriptors are native under Claude and external under Codex; Codex descriptors are native under Codex and external under Claude; Grok is external under both. Never call the external launcher for the parent's own provider.
 
-Record native and external results separately. A login-status command alone proves credentials, not that the requested model and effort flags run. On a Claude parent, Fable and Opus probes use the mapped `pstack-<stem>-<effort>` agent. On a Codex parent, Sol, Terra, and Luna probes use native `spawn_agent` with the descriptor's `reasoning_effort`. Every cross-parent pair uses the external runner with the exact effort flag.
+Record native and external results separately. A login-status command alone proves credentials, not that the requested model and effort flags run. In this experimental active matrix, Astra, Sol, Terra, and Luna probes use native `spawn_agent` on a Codex parent with the descriptor's `reasoning_effort`. A Claude parent runs these Codex lanes through the external runner. Preserve the legacy runner acceptance for immutable existing Claude or Grok descriptors, but do not select them in a new map.
 
 Receipts and native transcripts prove the requested effort and the route. They do not prove a provider's hidden applied reasoning depth. There is no implicit timeout, weaker-model fallback, same-provider external fallback, or second mutable configuration source.
 
@@ -98,15 +98,15 @@ Build the new sheet in memory. Do not write it yet.
 
 Ask whether to keep those role assignments or change named roles. Keeping them is the default. Apply only role changes the operator names; never offer a reset of a customized sheet to the first-run assignments. A changed lane may use any validated matrix family and effort, `inherit-parent`, or `auto`.
 
-Do not require every supported family to appear: Fable and Grok may be absent from the active map. The final map, not the matrix, is the complete source for the probe plan.
+The final map, not the matrix, is the complete source for the probe plan. `inherit-parent` and `auto` remain native, which means a Claude parent can make those roles non-OpenAI; OpenAI-only execution requires a Codex OpenAI parent.
 
-Leave `inherit-parent` and `auto` unchanged. Refuse an unqualified slug, an unavailable route, a model outside the six matrix families, or a provider/model mismatch.
+Leave `inherit-parent` and `auto` unchanged. Refuse an unqualified slug, an unavailable route, a model outside the four active matrix families, or a provider/model mismatch.
 
 ### 7. Confirm and commit
 
 Show the route table for this parent, then show every rendered role and descriptor. Ask for confirmation before writing.
 
-Why and Reflect require the parent's live MCP surface. Keep their investigator, reviewer, and synthesizer roles on `inherit-parent` or `auto`; the bounded external runner deliberately omits ambient MCPs. `inherit-parent` and `auto` always validate, but say when they reduce a panel's provider diversity. For panel roles, one lane runs per entry. The list length is the fan-out count. `arena cross-judge pool` is a list from which Arena chooses a provider different from the parent and base candidate when possible. `swarm workers` is the default for every worker unless a race explicitly assigns another descriptor.
+Why and Reflect require the parent's live MCP surface. Keep their investigator, reviewer, and synthesizer roles on `inherit-parent` or `auto`; the bounded external runner deliberately omits ambient MCPs. `inherit-parent` and `auto` always validate, but say when they reduce a panel's provider diversity. For panel roles, one lane runs per entry. The list length is the fan-out count. `arena cross-judge pool` is a list from which Arena chooses a model different from the likely base candidate when possible. `swarm workers` is the default for every worker unless a race explicitly assigns another descriptor.
 
 Every non-alias value must match `<provider>:<model>@<effort>` and must have passed step 5.
 
@@ -119,21 +119,21 @@ Provider-qualified per-role choices. Read the installed pstack provider-dispatch
 
 feature implementation: codex:gpt-5.6-terra@high
 refactoring implementation: codex:gpt-5.6-luna@high
-bug-fix: codex:gpt-5.6-sol@max
-perf-issue: codex:gpt-5.6-sol@max
-hillclimb: codex:gpt-5.6-sol@max
-judgment and prose: claude:claude-opus-5@xhigh
-hardest tasks: claude:claude-fable-5-1@max
+bug-fix: codex:gpt-6-astra@medium
+perf-issue: codex:gpt-6-astra@high
+hillclimb: codex:gpt-6-astra@high
+judgment and prose: codex:gpt-6-astra@medium
+hardest tasks: codex:gpt-6-astra@xhigh
 how explorer: codex:gpt-5.6-luna@medium
-how explainer: claude:claude-opus-5@xhigh
-how critics: codex:gpt-5.6-sol@max, claude:claude-fable-5-1@xhigh
+how explainer: codex:gpt-6-astra@medium
+how critics: codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium
 why investigators, synthesizer: inherit-parent
 reflect tooling, judgment, divergent, synthesizer: inherit-parent
-arena runners: codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh
-arena cross-judge pool: codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh
+arena runners: codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium
+arena cross-judge pool: codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium
 swarm workers: codex:gpt-5.6-luna@high
-architect runners: codex:gpt-5.6-sol@max, claude:claude-opus-5@xhigh
-interrogate reviewers: codex:gpt-5.6-sol@max, claude:claude-fable-5-1@xhigh
+architect runners: codex:gpt-6-astra@high, codex:gpt-5.6-sol@high
+interrogate reviewers: codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium
 ```
 
 ### 8. Wire it in
@@ -146,6 +146,6 @@ Do not copy the model sheet between harnesses without rerunning the parent-speci
 
 ### 9. Behavioral smoke
 
-Before declaring setup complete, run one small read-only mixed panel from this parent using the configured ordered lanes and an independent cross-judge from its pool. Launch Claude-native agents and every external process in the background with retained handles, then drain them. Verify the native transcript entries and every external receipt. A structural config check or unit test is not a substitute.
+Before declaring setup complete, run one small read-only panel from this parent using every configured ordered lane and a judge from its pool. For Arena and Architect's OpenAI-only experiment, choose the model different from the likely base when possible. Consensus requires multiple completed lanes; the configured list alone sets their count. Launch native agents and every required external process in the background with retained handles, then drain them. Verify the native transcript entries and every external receipt. A structural config check or unit test is not a substitute.
 
 Report the sheet path, parent route table, final-map probe results, smoke results, and external elapsed/token/cost receipts. Re-running this skill re-probes and updates the same sheet. Do not claim the provider exposed hidden applied-effort observability.
