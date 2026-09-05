@@ -79,6 +79,7 @@ export interface PausedAttempt extends ClaimedFields {
   readonly kind: "provider-paused";
   readonly observedAt: string;
   readonly nextAttemptAt: string;
+  readonly cooldownElapsedAt: string | null;
   readonly receiptSha256: string;
   readonly resetEvidence: string;
 }
@@ -438,6 +439,7 @@ function parseAttempts(
           ...CLAIM_KEYS,
           "observedAt",
           "nextAttemptAt",
+          "cooldownElapsedAt",
           "receiptSha256",
           "resetEvidence",
         ],
@@ -448,11 +450,20 @@ function parseAttempts(
       if (!sameClaim(previous, fields)) invalid("pause claim identity");
       const observed = instant(raw.observedAt, "observedAt");
       const next = instant(raw.nextAttemptAt, "nextAttemptAt");
+      const cooldownElapsedAt = raw.cooldownElapsedAt === null
+        ? null
+        : instant(raw.cooldownElapsedAt, "cooldownElapsedAt");
       if (
         spec.provider !== "claude" ||
         next.milliseconds - observed.milliseconds !== spec.retryIntervalMs
       ) {
         invalid("pause schedule");
+      }
+      if (
+        cooldownElapsedAt !== null &&
+        cooldownElapsedAt.milliseconds < next.milliseconds
+      ) {
+        invalid("cooldownElapsedAt before nextAttemptAt");
       }
       const resetEvidence = string(raw.resetEvidence, "resetEvidence");
       if (resetEvidence.length > 1_000) invalid("resetEvidence");
@@ -461,6 +472,7 @@ function parseAttempts(
         ...fields,
         observedAt: observed.value,
         nextAttemptAt: next.value,
+        cooldownElapsedAt: cooldownElapsedAt?.value ?? null,
         receiptSha256: digest(raw.receiptSha256, "receiptSha256"),
         resetEvidence,
       });
@@ -554,7 +566,7 @@ export function parseLaneRegistry(
     if (current === undefined) invalid("attempt history");
     if (
       current.kind === "claimed" ||
-      (current.kind === "provider-paused" && !terminalUnitIds.has(spec.unitId))
+      (current.kind === "provider-paused" && current.cooldownElapsedAt === null)
     ) {
       if (activeProviders.has(spec.provider)) invalid("multiple active lanes for provider");
       activeProviders.add(spec.provider);
@@ -669,6 +681,30 @@ export function latestAttempt(lane: Lane): LaneAttempt {
 
 export function appendAttempt(lane: Lane, attempt: LaneAttempt): Lane {
   return { ...lane, attempts: [...lane.attempts, attempt] };
+}
+
+export function replaceLatestAttempt(
+  lane: Lane,
+  current: PausedAttempt,
+  cooldownElapsedAt: string
+): Lane {
+  if (latestAttempt(lane) !== current) {
+    throw new Error(`cannot replace a non-latest attempt for lane ${lane.spec.laneId}`);
+  }
+  if (current.cooldownElapsedAt !== null) {
+    throw new Error(`cannot replace an elapsed cooldown for lane ${lane.spec.laneId}`);
+  }
+  const elapsed = instant(cooldownElapsedAt, "cooldownElapsedAt");
+  if (elapsed.milliseconds < Date.parse(current.nextAttemptAt)) {
+    throw new Error(`cannot elapse cooldown early for lane ${lane.spec.laneId}`);
+  }
+  return {
+    ...lane,
+    attempts: [
+      ...lane.attempts.slice(0, -1),
+      { ...current, cooldownElapsedAt: elapsed.value },
+    ],
+  };
 }
 
 export function replaceLane(registry: LaneRegistry, lane: Lane): LaneRegistry {

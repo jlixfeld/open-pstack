@@ -595,6 +595,7 @@ describe("managed provider lane scheduling", () => {
       kind: "provider-paused",
       observedAt: new Date(observedAt).toISOString(),
       nextAttemptAt: new Date(observedAt + 1_800_000).toISOString(),
+      cooldownElapsedAt: null,
     });
     setNow(observedAt + 1_800_000 - 1);
     expect(await tickPlans(store)).toEqual([]);
@@ -610,6 +611,7 @@ describe("managed provider lane scheduling", () => {
     expect(await tickPlans(store)).toEqual([due]);
     paused = (await registry(directory)).lanes[0].attempts.at(-2);
     expect(paused.nextAttemptAt).toBe(new Date(observedAt + 1_800_000).toISOString());
+    expect(paused.cooldownElapsedAt).toBeNull();
   });
 
   it("applies the configured interval from the receipt observation", async () => {
@@ -701,7 +703,10 @@ describe("managed provider lane scheduling", () => {
     expect(plan.laneId).toBe("live-review");
     const value = await registry(directory);
     expect(value.lanes.find((lane: any) => lane.spec.laneId === "dead-pause")
-      .attempts.at(-1).kind).toBe("provider-paused");
+      .attempts.at(-1)).toMatchObject({
+        kind: "provider-paused",
+        cooldownElapsedAt: new Date(START + 5_000 + 1_800_000).toISOString(),
+      });
     expect(value.lanes.find((lane: any) => lane.spec.laneId === "live-review")
       .attempts.at(-1).kind).toBe("claimed");
 
@@ -710,7 +715,78 @@ describe("managed provider lane scheduling", () => {
     expect(await tickPlans(store)).toEqual([]);
     expect((await registry(directory)).lanes.find(
       (lane: any) => lane.spec.laneId === "dead-pause"
-    ).attempts.at(-1).kind).toBe("provider-paused");
+    ).attempts.at(-1)).toMatchObject({
+      kind: "provider-paused",
+      cooldownElapsedAt: new Date(START + 5_000 + 1_800_000).toISOString(),
+    });
+  });
+
+  it("records an elapsed terminal cooldown once without appending an attempt", async () => {
+    const { directory, store, prompt, setNow } = await fixture();
+    await store.lanes.register(registration(prompt));
+    const [plan] = await tickPlans(store);
+    if (plan === undefined) throw new Error("missing plan");
+    const observedAt = START + 5_000;
+    await finishPause(plan, observedAt);
+    setNow(observedAt);
+    await tickPlans(store);
+    await store.units.set({ id: "unit", state: "abandoned" });
+
+    const dueAt = observedAt + 1_800_000;
+    setNow(dueAt);
+    expect(await tickPlans(store)).toEqual([]);
+    const first = (await registry(directory)).lanes[0];
+    expect(first.attempts).toHaveLength(3);
+    expect(first.attempts.at(-1)).toMatchObject({
+      kind: "provider-paused",
+      cooldownElapsedAt: new Date(dueAt).toISOString(),
+    });
+
+    setNow(dueAt + 60_000);
+    expect(await tickPlans(store)).toEqual([]);
+    expect((await registry(directory)).lanes[0]).toEqual(first);
+  });
+
+  it("does not let an old sibling claim shorten a newer terminal cooldown", async () => {
+    const { directory, store, prompt, setNow } = await fixture();
+    setNow(START + 2 * 60 * 60_000);
+    await store.lanes.register(registration(prompt, { laneId: "historic" }));
+    const [historic] = await tickPlans(store);
+    if (historic === undefined) throw new Error("missing historic plan");
+    await finishComplete(historic, START + 2 * 60 * 60_000 + 5_000);
+    await tickPlans(store);
+
+    setNow(START + 60_000);
+    await store.units.add({ id: "paused-unit", track: "test" });
+    await store.lanes.register(registration(prompt, {
+      laneId: "new-pause",
+      unitId: "paused-unit",
+    }));
+    const [pausePlan] = await tickPlans(store);
+    if (pausePlan === undefined) throw new Error("missing pause plan");
+    const observedAt = START + 65_000;
+    await finishPause(pausePlan, observedAt);
+    setNow(observedAt);
+    await tickPlans(store);
+    await store.units.set({ id: "paused-unit", state: "abandoned" });
+
+    await store.units.add({ id: "live-unit", track: "test" });
+    await store.lanes.register(registration(prompt, {
+      laneId: "live-review",
+      unitId: "live-unit",
+    }));
+    setNow(observedAt + 60_000);
+
+    expect(await tickPlans(store)).toEqual([]);
+    expect((await registry(directory)).lanes.find(
+      (lane: any) => lane.spec.laneId === "new-pause"
+    ).attempts.at(-1)).toMatchObject({
+      kind: "provider-paused",
+      cooldownElapsedAt: null,
+    });
+
+    setNow(observedAt + 1_800_000);
+    expect((await tickPlans(store))[0]?.laneId).toBe("live-review");
   });
 
   it("replays a live sibling claim after restart and rollback past an expired terminal pause", async () => {
@@ -741,7 +817,10 @@ describe("managed provider lane scheduling", () => {
     expect(await tickPlans(restarted)).toEqual([live]);
     const value = await registry(directory);
     expect(value.lanes.find((lane: any) => lane.spec.laneId === "dead-pause")
-      .attempts.at(-1).kind).toBe("provider-paused");
+      .attempts.at(-1)).toMatchObject({
+        kind: "provider-paused",
+        cooldownElapsedAt: new Date(START + 5_000 + 1_800_000).toISOString(),
+      });
     expect(value.lanes.find((lane: any) => lane.spec.laneId === "live-review")
       .attempts.at(-1)).toMatchObject({
         kind: "claimed",

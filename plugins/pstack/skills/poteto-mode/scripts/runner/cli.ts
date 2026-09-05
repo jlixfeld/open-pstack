@@ -1,5 +1,5 @@
 import { parseArgs as parseNodeArgs } from "node:util";
-import { resolvedOptions, runLane } from "./run.ts";
+import { resolvedOptions, runLane, type RunStart } from "./run.ts";
 import {
   ACCESS_MODES,
   EFFORTS,
@@ -174,7 +174,10 @@ export function parseArgs(argv: readonly string[]): RunnerOptions | null {
 
 export async function main(
   argv: readonly string[],
-  startedAt: number = Date.now(),
+  startedAt: number | RunStart = {
+    wallTimeMs: Date.now(),
+    monotonicTimeMs: performance.now(),
+  },
   io: Io = defaultIo
 ): Promise<number> {
   try {

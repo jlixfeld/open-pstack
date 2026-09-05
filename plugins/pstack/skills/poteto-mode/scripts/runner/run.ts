@@ -59,6 +59,60 @@ export interface RunResult {
   readonly receipt: RunnerReceipt;
 }
 
+export interface RunStart {
+  readonly wallTimeMs: number;
+  readonly monotonicTimeMs: number;
+}
+
+interface RunTiming {
+  readonly startedAt: string;
+  readonly completedAt: string;
+  readonly elapsedMs: number;
+}
+
+interface RunClock {
+  readonly deadlineAt: number | null;
+  monotonicNow(): number;
+  timing(): RunTiming;
+}
+
+type RunStartInput = number | RunStart;
+type MonotonicClock = () => number;
+
+function normalizeRunStart(start: RunStartInput): RunStart {
+  if (typeof start !== "number") return start;
+  const wallNow = Date.now();
+  const monotonicNow = performance.now();
+  return {
+    wallTimeMs: start,
+    monotonicTimeMs: monotonicNow - Math.max(0, wallNow - start),
+  };
+}
+
+function createRunClock(
+  start: RunStartInput,
+  timeoutMs: number | null,
+  monotonicNow: MonotonicClock
+): RunClock {
+  const origin = normalizeRunStart(start);
+  const startedAt = new Date(origin.wallTimeMs).toISOString();
+  return {
+    deadlineAt: timeoutMs === null ? null : origin.monotonicTimeMs + timeoutMs,
+    monotonicNow,
+    timing() {
+      const elapsedMs = Math.max(
+        0,
+        Math.floor(monotonicNow() - origin.monotonicTimeMs)
+      );
+      return {
+        startedAt,
+        completedAt: new Date(origin.wallTimeMs + elapsedMs).toISOString(),
+        elapsedMs,
+      };
+    },
+  };
+}
+
 function evidence(value: string): string {
   return value.trim().slice(0, ERROR_EVIDENCE_LIMIT);
 }
@@ -225,7 +279,7 @@ async function runProcess(
   cwd: string,
   env: NodeJS.ProcessEnv,
   prompt: string | Uint8Array,
-  deadlineAt: number | null,
+  clock: RunClock,
   cancellation: RunCancellation
 ): Promise<ProcessResult> {
   const child = Bun.spawn([executable, ...spec.args], {
@@ -247,11 +301,12 @@ async function runProcess(
     kind: "cancelled",
     signal,
   }));
+  const deadlineAt = clock.deadlineAt;
   const deadline: Promise<ProcessEvent> | null = deadlineAt === null
     ? null
     : new Promise((resolve) => {
       const arm = (): void => {
-        const remaining = deadlineAt - Date.now();
+        const remaining = deadlineAt - clock.monotonicNow();
         if (remaining <= 0) {
           resolve({ kind: "timed-out" });
           return;
@@ -288,7 +343,10 @@ async function runProcess(
       const drain = await Promise.race(drains);
       if (drain.kind === "drained") {
         captured = drain.captured;
-        if (deadlineAt !== null && Date.now() >= deadlineAt) {
+        if (
+          clock.deadlineAt !== null &&
+          clock.monotonicNow() >= clock.deadlineAt
+        ) {
           outcome = { kind: "timed-out" };
         }
       } else {
@@ -327,16 +385,18 @@ async function runProcess(
 }
 
 async function waitForGrokPreflightRetry(
-  deadlineAt: number | null,
+  clock: RunClock,
   cancellation: RunCancellation
 ): Promise<RetryWaitResult> {
   if (cancellation.signal !== null) return "cancelled";
 
-  const now = Date.now();
-  if (deadlineAt !== null && now >= deadlineAt) return "timed-out";
+  const now = clock.monotonicNow();
+  if (clock.deadlineAt !== null && now >= clock.deadlineAt) return "timed-out";
 
   const retryAt = now + GROK_PREFLIGHT_RETRY_DELAY_MS;
-  const wakeAt = deadlineAt === null ? retryAt : Math.min(retryAt, deadlineAt);
+  const wakeAt = clock.deadlineAt === null
+    ? retryAt
+    : Math.min(retryAt, clock.deadlineAt);
   const timerResult: RetryWaitResult = wakeAt < retryAt ? "timed-out" : "ready";
   let timer: ReturnType<typeof setTimeout> | null = null;
   try {
@@ -347,7 +407,12 @@ async function waitForGrokPreflightRetry(
       }),
     ]);
     if (cancellation.signal !== null) return "cancelled";
-    if (deadlineAt !== null && Date.now() >= deadlineAt) return "timed-out";
+    if (
+      clock.deadlineAt !== null &&
+      clock.monotonicNow() >= clock.deadlineAt
+    ) {
+      return "timed-out";
+    }
     return result;
   } finally {
     if (timer !== null) clearTimeout(timer);
@@ -512,20 +577,19 @@ interface LaneProgress {
 async function executeLane(
   options: RunnerOptions,
   cancellation: RunCancellation,
-  started: number,
-  deadlineAt: number | null,
+  clock: RunClock,
   invocation: CommandSpec,
   preflight: CommandSpec,
   progress: LaneProgress,
   prompt: Uint8Array,
   managedAttempt: VerifiedManagedAttempt | null
 ): Promise<RunResult> {
-  const startedAt = new Date(started).toISOString();
   const env = childEnvironment(options.provider);
-  const executable = Bun.which(invocation.command, {
+  const foundExecutable = Bun.which(invocation.command, {
     PATH: env.PATH,
     cwd: options.cwd,
   });
+  const executable = foundExecutable === null ? null : resolve(foundExecutable);
   progress.executable = executable;
   progress.argv = [executable ?? invocation.command, ...invocation.args];
 
@@ -536,7 +600,7 @@ async function executeLane(
     status: "cancelled" | "timed-out",
     phase: string
   ): RunResult => {
-    const completed = Date.now();
+    const timing = clock.timing();
     const receivedSignal = status === "cancelled" ? cancellation.signal : null;
     const terminalPreflight = preflightState.status === "not-run"
       ? { ...preflightState, status }
@@ -545,9 +609,7 @@ async function executeLane(
       status,
       provider: options.provider,
       managedAttempt,
-      startedAt,
-      completedAt: new Date(completed).toISOString(),
-      elapsedMs: completed - started,
+      ...timing,
       executable,
       preflight: terminalPreflight,
       argv: [executable ?? invocation.command, ...invocation.args],
@@ -568,19 +630,20 @@ async function executeLane(
   if (cancellation.signal !== null) {
     return finishWithoutChild("cancelled", "before authentication preflight");
   }
-  if (deadlineAt !== null && Date.now() >= deadlineAt) {
+  if (
+    clock.deadlineAt !== null &&
+    clock.monotonicNow() >= clock.deadlineAt
+  ) {
     return finishWithoutChild("timed-out", "before authentication preflight");
   }
 
   if (executable === null) {
-    const completed = Date.now();
+    const timing = clock.timing();
     receipt = buildReceipt(options, {
       status: "unavailable-cli",
       provider: options.provider,
       managedAttempt,
-      startedAt,
-      completedAt: new Date(completed).toISOString(),
-      elapsedMs: completed - started,
+      ...timing,
       executable: null,
       preflight: preflightState,
       argv: [invocation.command, ...invocation.args],
@@ -603,7 +666,7 @@ async function executeLane(
     options.cwd,
     env,
     "",
-    deadlineAt,
+    clock,
     cancellation
   );
   let rawPreflightEvidence = evidence(`${preflightResult.stdout}\n${preflightResult.stderr}`);
@@ -630,7 +693,7 @@ async function executeLane(
     };
     progress.preflight = preflightState;
 
-    const retryWait = await waitForGrokPreflightRetry(deadlineAt, cancellation);
+    const retryWait = await waitForGrokPreflightRetry(clock, cancellation);
     if (retryWait !== "ready") {
       preflightState = {
         ...preflightState,
@@ -650,7 +713,7 @@ async function executeLane(
       options.cwd,
       env,
       "",
-      deadlineAt,
+      clock,
       cancellation
     );
     rawPreflightEvidence = evidence(`${preflightResult.stdout}\n${preflightResult.stderr}`);
@@ -683,7 +746,7 @@ async function executeLane(
   progress.preflight = preflightState;
 
   if (preflightState.status !== "passed") {
-    const completed = Date.now();
+    const timing = clock.timing();
     const preflightFailure = preflightAssessment.kind === "failed"
       ? preflightAssessment.receiptStatus
       : "child-failed";
@@ -696,9 +759,7 @@ async function executeLane(
       status,
       provider: options.provider,
       managedAttempt,
-      startedAt,
-      completedAt: new Date(completed).toISOString(),
-      elapsedMs: completed - started,
+      ...timing,
       executable,
       preflight: preflightState,
       argv: [executable, ...invocation.args],
@@ -721,7 +782,10 @@ async function executeLane(
   if (cancellation.signal !== null) {
     return finishWithoutChild("cancelled", "before model execution");
   }
-  if (deadlineAt !== null && Date.now() >= deadlineAt) {
+  if (
+    clock.deadlineAt !== null &&
+    clock.monotonicNow() >= clock.deadlineAt
+  ) {
     return finishWithoutChild("timed-out", "before model execution");
   }
 
@@ -731,14 +795,11 @@ async function executeLane(
     options.cwd,
     env,
     prompt,
-    deadlineAt,
+    clock,
     cancellation
   );
-  const completed = Date.now();
   const base = {
-    startedAt,
-    completedAt: new Date(completed).toISOString(),
-    elapsedMs: completed - started,
+    ...clock.timing(),
     executable,
     preflight: preflightState,
     argv: [executable, ...invocation.args],
@@ -850,11 +911,15 @@ async function executeLane(
 
 export async function runLane(
   input: RunnerOptions,
-  started: number = Date.now()
+  started: RunStartInput = {
+    wallTimeMs: Date.now(),
+    monotonicTimeMs: performance.now(),
+  },
+  monotonicNow: MonotonicClock = () => performance.now()
 ): Promise<RunResult> {
   const options = resolvedOptions(input);
   validateRunnerOptions(options);
-  const deadlineAt = options.timeoutMs === null ? null : started + options.timeoutMs;
+  const clock = createRunClock(started, options.timeoutMs, monotonicNow);
   const invocation = invocationCommand(options);
   const preflight = preflightCommand(options.provider);
   const progress: LaneProgress = {
@@ -876,8 +941,7 @@ export async function runLane(
       return await executeLane(
         options,
         cancellation,
-        started,
-        deadlineAt,
+        clock,
         invocation,
         preflight,
         progress,
@@ -885,11 +949,11 @@ export async function runLane(
         prepared.managedAttempt
       );
     } catch (error) {
-      const completed = Date.now();
+      const timing = clock.timing();
       const signal = cancellation.signal;
       const status: FailureReceiptStatus = signal !== null
         ? "cancelled"
-        : deadlineAt !== null && completed >= deadlineAt
+        : clock.deadlineAt !== null && clock.monotonicNow() >= clock.deadlineAt
           ? "timed-out"
           : "child-failed";
       const message = error instanceof Error ? error.message : String(error);
@@ -899,9 +963,7 @@ export async function runLane(
       const receipt = buildReceipt(options, {
         status,
         provider: options.provider,
-        startedAt: new Date(started).toISOString(),
-        completedAt: new Date(completed).toISOString(),
-        elapsedMs: completed - started,
+        ...timing,
         executable: progress.executable,
         preflight: terminalPreflight,
         argv: progress.argv,

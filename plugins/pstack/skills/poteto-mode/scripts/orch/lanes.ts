@@ -30,6 +30,7 @@ import {
   loadLaneRegistry,
   MINIMUM_RETRY_INTERVAL_MS,
   pathExists,
+  replaceLatestAttempt,
   replaceLane,
   saveLaneRegistry,
   writePrivateAtomic,
@@ -385,6 +386,7 @@ async function settleLane(store: string, lane: Lane): Promise<Lane> {
       nextAttemptAt: new Date(
         observedMilliseconds + lane.spec.retryIntervalMs
       ).toISOString(),
+      cooldownElapsedAt: null,
       receiptSha256,
       resetEvidence: parsed.receipt.providerPause.resetEvidence,
     });
@@ -414,28 +416,35 @@ interface ProviderOccupancy {
   readonly attempt: ClaimedAttempt | PausedAttempt;
 }
 
-function siblingClaimProvesPauseExpired(
+function recordElapsedTerminalPauses(
   registry: LaneRegistry,
-  pausedLane: Lane,
-  nextAttemptAt: number
-): boolean {
-  return registry.lanes.some(
-    (lane) =>
-      lane.spec.provider === pausedLane.spec.provider &&
-      lane.spec.laneId !== pausedLane.spec.laneId &&
-      lane.attempts.some(
-        (attempt) =>
-          attempt.kind !== "registered" &&
-          Date.parse(attempt.claimedAt) >= nextAttemptAt
-      )
-  );
+  terminalUnitIds: ReadonlySet<string>,
+  clock: LaneClock
+): LaneRegistry {
+  const elapsedAt = clock();
+  let result = registry;
+  for (const lane of registry.lanes) {
+    if (!terminalUnitIds.has(lane.spec.unitId)) continue;
+    const current = latestAttempt(lane);
+    if (
+      current.kind !== "provider-paused" ||
+      current.cooldownElapsedAt !== null ||
+      elapsedAt < Date.parse(current.nextAttemptAt)
+    ) {
+      continue;
+    }
+    result = replaceLane(
+      result,
+      replaceLatestAttempt(lane, current, new Date(elapsedAt).toISOString())
+    );
+  }
+  return result;
 }
 
 function providerBarrier(
   registry: LaneRegistry,
   provider: Provider,
-  terminalUnitIds: ReadonlySet<string>,
-  clock: LaneClock
+  terminalUnitIds: ReadonlySet<string>
 ): ProviderOccupancy | null {
   for (const lane of registry.lanes) {
     if (lane.spec.provider !== provider) continue;
@@ -449,11 +458,7 @@ function providerBarrier(
     if (!terminalUnitIds.has(lane.spec.unitId)) {
       return { lane, attempt: current };
     }
-    const nextAttemptAt = Date.parse(current.nextAttemptAt);
-    if (
-      clock() < nextAttemptAt &&
-      !siblingClaimProvesPauseExpired(registry, lane, nextAttemptAt)
-    ) return { lane, attempt: current };
+    if (current.cooldownElapsedAt === null) return { lane, attempt: current };
   }
   return null;
 }
@@ -582,6 +587,7 @@ export async function tick(
     store,
     await loadLaneRegistry(store, unitIds, terminalUnitIds)
   );
+  registry = recordElapsedTerminalPauses(registry, terminalUnitIds, clock);
   const plans: LaunchPlan[] = [];
   const stalledLanes: StalledLane[] = [];
   const providers = registry.lanes.reduce<Provider[]>((result, lane) => {
@@ -590,7 +596,7 @@ export async function tick(
   }, []);
 
   for (const provider of providers) {
-    const barrier = providerBarrier(registry, provider, terminalUnitIds, clock);
+    const barrier = providerBarrier(registry, provider, terminalUnitIds);
     if (barrier !== null) {
       const current = barrier.attempt;
       if (current.kind === "claimed") {
@@ -679,6 +685,7 @@ export async function retry(
     store,
     await loadLaneRegistry(store, unitIds, terminalUnitIds)
   );
+  registry = recordElapsedTerminalPauses(registry, terminalUnitIds, clock);
   const lane = registry.lanes.find((row) => row.spec.laneId === cleanLaneId);
   if (lane === undefined) throw new UserError(`lane ${cleanLaneId} not found`);
   const terminalState = terminalUnitStates.get(lane.spec.unitId);
@@ -696,8 +703,7 @@ export async function retry(
   const barrier = providerBarrier(
     registry,
     lane.spec.provider,
-    terminalUnitIds,
-    clock
+    terminalUnitIds
   );
   if (barrier !== null) {
     await saveLaneRegistry(store, registry, unitIds, terminalUnitIds);

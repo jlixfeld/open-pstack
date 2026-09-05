@@ -7,6 +7,7 @@ import {
   laneArtifactPaths,
   laneSnapshotPath,
   parseLaneRegistry,
+  replaceLatestAttempt,
   saveLaneRegistry,
 } from "./lane-registry.ts";
 import { openStore, type Store } from "./store.ts";
@@ -74,6 +75,7 @@ function terminal(
           kind,
           observedAt: at,
           nextAttemptAt: "2026-09-04T12:30:05.000Z",
+          cooldownElapsedAt: null,
           receiptSha256: "a".repeat(64),
           resetEvidence: "You've hit your session limit - resets later",
         }
@@ -328,6 +330,16 @@ describe("provider lane registry parsing", () => {
     const shiftedSchedule = copy(paused);
     shiftedSchedule.lanes[0].attempts.at(-1).nextAttemptAt = "2026-09-04T12:31:05.000Z";
     cases.push(shiftedSchedule);
+    const missingCooldown = copy(paused);
+    delete missingCooldown.lanes[0].attempts.at(-1).cooldownElapsedAt;
+    cases.push(missingCooldown);
+    const malformedCooldown = copy(paused);
+    malformedCooldown.lanes[0].attempts.at(-1).cooldownElapsedAt = "later";
+    cases.push(malformedCooldown);
+    const earlyCooldown = copy(paused);
+    earlyCooldown.lanes[0].attempts.at(-1).cooldownElapsedAt =
+      "2026-09-04T12:30:04.999Z";
+    cases.push(earlyCooldown);
     const emptyReset = copy(paused);
     emptyReset.lanes[0].attempts.at(-1).resetEvidence = "";
     cases.push(emptyReset);
@@ -345,6 +357,59 @@ describe("provider lane registry parsing", () => {
     for (const value of cases) {
       await rejectsWithoutMutation(directory, store, value);
     }
+  });
+
+  it("accepts a canonical cooldown transition at or after the scheduled retry", async () => {
+    const { directory, claimed } = await fixture();
+    const paused = terminal(claimed, "provider-paused");
+
+    for (const cooldownElapsedAt of [
+      "2026-09-04T12:30:05.000Z",
+      "2026-09-04T12:30:05.001Z",
+    ]) {
+      const value = copy(paused);
+      value.lanes[0].attempts.at(-1).cooldownElapsedAt = cooldownElapsedAt;
+      expect(parseLaneRegistry(value, directory, UNIT_IDS)).toEqual(value);
+    }
+  });
+
+  it("replaces only the current unelapsed pause", async () => {
+    const { directory, claimed } = await fixture();
+    const parsed = parseLaneRegistry(
+      terminal(claimed, "provider-paused"),
+      directory,
+      UNIT_IDS
+    );
+    const lane = parsed.lanes[0];
+    const current = lane?.attempts.at(-1);
+    if (lane === undefined || current?.kind !== "provider-paused") {
+      throw new Error("missing paused attempt");
+    }
+    const elapsedAt = current.nextAttemptAt;
+
+    const replaced = replaceLatestAttempt(lane, current, elapsedAt);
+
+    expect(replaced.attempts.slice(0, -1)).toEqual(lane.attempts.slice(0, -1));
+    expect(replaced.attempts.at(-1)).toEqual({
+      ...current,
+      cooldownElapsedAt: elapsedAt,
+    });
+    const replacedCurrent = replaced.attempts.at(-1);
+    if (replacedCurrent?.kind !== "provider-paused") {
+      throw new Error("missing elapsed pause");
+    }
+    expect(() =>
+      replaceLatestAttempt(lane, copy(current), elapsedAt)
+    ).toThrow("non-latest");
+    expect(() =>
+      replaceLatestAttempt(replaced, replacedCurrent, elapsedAt)
+    ).toThrow("elapsed cooldown");
+    expect(() =>
+      replaceLatestAttempt(lane, current, "later")
+    ).toThrow("cooldownElapsedAt");
+    expect(() =>
+      replaceLatestAttempt(lane, current, "2026-09-04T12:30:04.999Z")
+    ).toThrow("cooldown early");
   });
 
   it("rejects multiple current claims for one provider", async () => {

@@ -11,7 +11,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { invocationCommand, preflightCommand } from "./commands.ts";
 import { laneFingerprint, sha256Hex } from "./identity.ts";
@@ -164,6 +164,9 @@ if (name === "claude") {
       result: process.env.FAKE_CLAUDE_PAUSE_RESULT ?? "You've hit your session limit · resets 2:10pm (America/Toronto)",
       type: "result",
     }));
+    if (process.env.FAKE_CLAUDE_PAUSE_WRITTEN_PATH) {
+      writeFileSync(process.env.FAKE_CLAUDE_PAUSE_WRITTEN_PATH, String(process.pid));
+    }
     if (process.env.FAKE_CLAUDE_PAUSE_WAIT_FOR_SIGNAL === "1") {
       await Bun.sleep(5_000);
     }
@@ -376,6 +379,7 @@ beforeEach(() => {
   delete process.env.FAKE_CLAUDE_PAUSE_RESULT;
   delete process.env.FAKE_INVOCATION_LOG_PATH;
   delete process.env.FAKE_CLAUDE_PAUSE_WAIT_FOR_SIGNAL;
+  delete process.env.FAKE_CLAUDE_PAUSE_WRITTEN_PATH;
   delete process.env.FAKE_CODEX_FAILURE_LENGTH;
   delete process.env.FAKE_MALFORMED_TELEMETRY;
 });
@@ -410,6 +414,7 @@ afterEach(() => {
   delete process.env.FAKE_CLAUDE_PAUSE_RESULT;
   delete process.env.FAKE_INVOCATION_LOG_PATH;
   delete process.env.FAKE_CLAUDE_PAUSE_WAIT_FOR_SIGNAL;
+  delete process.env.FAKE_CLAUDE_PAUSE_WRITTEN_PATH;
   delete process.env.FAKE_CODEX_FAILURE_LENGTH;
   delete process.env.FAKE_MALFORMED_TELEMETRY;
   rmSync(scratch, { recursive: true, force: true });
@@ -657,6 +662,7 @@ describe("runLane", () => {
   it("gives cancellation precedence over a received pause envelope", async () => {
     const input = managedOptions("managed-pause-cancelled");
     const modelStarted = join(scratch, "managed-pause-cancelled.model");
+    const pauseWritten = join(scratch, "managed-pause-cancelled.pause-written");
     const invocationLog = join(scratch, "managed-pause-cancelled.invocation.json");
     const runner = Bun.spawn([process.execPath, ...runnerArgs(input)], {
       cwd: scratch,
@@ -664,6 +670,7 @@ describe("runLane", () => {
         ...process.env,
         FAKE_CLAUDE_PAUSE_EXIT: "1",
         FAKE_CLAUDE_PAUSE_WAIT_FOR_SIGNAL: "1",
+        FAKE_CLAUDE_PAUSE_WRITTEN_PATH: pauseWritten,
         FAKE_MODEL_STARTED_PATH: modelStarted,
         FAKE_INVOCATION_LOG_PATH: invocationLog,
       },
@@ -672,7 +679,7 @@ describe("runLane", () => {
     });
     const stdout = new Response(runner.stdout).text();
     const stderr = new Response(runner.stderr).text();
-    await Bun.sleep(300);
+    await waitFor(pauseWritten);
     runner.kill("SIGTERM");
 
     expect(await exitWithin(runner, 3_000)).toBe(130);
@@ -685,6 +692,21 @@ describe("runLane", () => {
       error: {
         evidence: expect.stringContaining("You've hit your session limit"),
       },
+    });
+  });
+
+  it("normalizes the executable found through a trailing-slash PATH entry", async () => {
+    process.env.PATH = `${bin}/:${dirname(process.execPath)}:${previousPath ?? ""}`;
+    const input = options("claude", "normalized-executable");
+
+    const result = await runLane(input);
+
+    expect(result.exitCode).toBe(0);
+    const normalized = resolve(bin, "claude");
+    expect(receipt(input.receiptPath)).toMatchObject({
+      executable: normalized,
+      preflight: { argv: [normalized, ...preflightCommand("claude").args] },
+      argv: [normalized, ...invocationCommand(input).args],
     });
   });
 
@@ -1133,6 +1155,29 @@ describe("runLane", () => {
       status: "timed-out",
       preflight: { status: "timed-out" },
     });
+  });
+
+  it("uses monotonic elapsed time for a deadline after wall-clock rollback", async () => {
+    process.env.FAKE_MODEL_DELAY_MS = "1000";
+    const input = {
+      ...options("claude", "wall-clock-rollback"),
+      timeoutMs: 300,
+    };
+    const startedAt = Date.now() + 60_000;
+
+    const result = await runLane(input, startedAt);
+    const recorded = receipt(input.receiptPath);
+
+    expect(result.exitCode).toBe(124);
+    expect(recorded).toMatchObject({
+      status: "timed-out",
+      startedAt: new Date(startedAt).toISOString(),
+      preflight: { status: "passed" },
+    });
+    expect(recorded.elapsedMs).toBeGreaterThanOrEqual(250);
+    expect(Date.parse(recorded.completedAt) - Date.parse(recorded.startedAt)).toBe(
+      recorded.elapsedMs
+    );
   });
 
   it("spends one explicit deadline across preflight and model execution", async () => {
