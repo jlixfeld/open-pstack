@@ -2,6 +2,12 @@
 
 This port applies the Cursor → Claude Code substitutions in skill bodies. Earlier drafts left them flagged; this revision resolves them. A later pass added a Codex build that shares the same skills; see [Codex port](#codex-port) below.
 
+## 1.3.0-E1 identifies the OpenAI-only experiment
+
+E1 marks the Astra and Sol routing experiment introduced in PR #17. The package
+now has a distinct version in both plugin managers. This version-label change
+preserves the existing routing and Cursor pstack 0.14.3 sync point.
+
 ## 1.3.0 adds role-qualified tiered routing, durable Claude quota pauses, and Cursor upstream monitoring
 
 Managed provider lanes now persist immutable route and prompt snapshots in the
