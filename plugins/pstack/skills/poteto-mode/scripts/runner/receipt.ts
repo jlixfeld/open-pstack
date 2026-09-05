@@ -532,8 +532,7 @@ export function parseRunnerReceipt(value: unknown): RunnerReceiptV2 | null {
     started === null ||
     completed === null ||
     elapsedMs === null ||
-    completed.milliseconds < started.milliseconds ||
-    elapsedMs !== completed.milliseconds - started.milliseconds ||
+    completed.milliseconds - started.milliseconds < elapsedMs ||
     executable === invalid ||
     exitCode === invalid ||
     signal === invalid ||

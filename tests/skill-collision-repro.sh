@@ -45,6 +45,20 @@ else
   fail=1
 fi
 
+release_bad=""
+vc_re="$(printf '%s' "$vc" | sed 's/\./\\./g')"
+grep -Fq "Open Pstack $vc retains this" "$repo/UPSTREAM.md" || release_bad="${release_bad}UPSTREAM.md prose does not name Open Pstack $vc"$'\n'
+grep -Fq "Open Pstack $vc tracks pstack" "$repo/README.md" || release_bad="${release_bad}README.md does not name Open Pstack $vc"$'\n'
+grep -Fq "Version $vc is synced to Cursor pstack" "$repo/docs/reference.md" || release_bad="${release_bad}docs/reference.md does not name version $vc"$'\n'
+grep -Eq "^## ${vc_re}( |\$)" "$repo/CHANGES.md" || release_bad="${release_bad}CHANGES.md has no release section headed ## $vc"$'\n'
+if [ -n "$release_bad" ]; then
+  note "FAIL: release $vc is not named consistently outside the manifests:"
+  note "$release_bad"
+  fail=1
+else
+  note "ok: README.md, docs/reference.md, UPSTREAM.md prose, and CHANGES.md all name release $vc"
+fi
+
 setup="$repo/plugins/pstack/skills/setup-pstack/SKILL.md"
 dispatch="$repo/plugins/pstack/skills/poteto-mode/references/provider-dispatch.md"
 route_bad=""

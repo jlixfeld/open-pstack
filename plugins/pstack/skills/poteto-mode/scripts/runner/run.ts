@@ -106,7 +106,9 @@ function createRunClock(
       );
       return {
         startedAt,
-        completedAt: new Date(origin.wallTimeMs + elapsedMs).toISOString(),
+        completedAt: new Date(
+          Math.max(Date.now(), origin.wallTimeMs + elapsedMs)
+        ).toISOString(),
         elapsedMs,
       };
     },

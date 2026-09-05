@@ -166,7 +166,7 @@ describe("runner receipt parsing", () => {
       replace(valid, { status: "future-status" }),
       replace(valid, { parent: "claude" }),
       replace(valid, { model: "gpt-5.6-sol" }),
-      replace(valid, { elapsedMs: 1_249 }),
+      replace(valid, { elapsedMs: 1_251 }),
       replace(valid, { argv: ["claude", "--wrong"] }),
       replace(valid, {
         preflight: { ...valid.preflight, argv: ["claude", "wrong"] },
@@ -226,6 +226,20 @@ describe("runner receipt parsing", () => {
     for (const candidate of cases) {
       expect(parseRunnerReceipt(candidate)).toBeNull();
     }
+  });
+
+  it("accepts a wall-clock span at least as long as the monotonic elapsed time", () => {
+    const valid = completeReceipt();
+    const laterCompletedAt = "2026-09-04T13:00:01.250Z";
+    const jumpedForward = replace(valid, { completedAt: laterCompletedAt });
+
+    expect(parseRunnerReceipt(jumpedForward)?.completedAt).toBe(laterCompletedAt);
+    expect(parseRunnerReceipt(replace(valid, { elapsedMs: 1_251 }))).toBeNull();
+    expect(parseRunnerReceipt(replace(valid, {
+      completedAt: laterCompletedAt,
+      elapsedMs: 3_601_251,
+    }))).toBeNull();
+    expect(parseRunnerReceipt(replace(valid, { completedAt: valid.startedAt }))).toBeNull();
   });
 
   it("rejects an otherwise consistent receipt with an uppercase managed lane id", () => {
@@ -295,6 +309,13 @@ describe("runner receipt parsing", () => {
 
     expect(paused.outputSha256).toBeNull();
     expect(parseRunnerReceipt(paused)).toEqual(paused);
+    const observedAfterJump = replace(paused, {
+      completedAt: "2026-09-04T13:00:01.250Z",
+      providerPause: { ...paused.providerPause, observedAt: "2026-09-04T13:00:01.250Z" },
+    });
+    expect(parseRunnerReceipt(observedAfterJump)?.completedAt).toBe(
+      "2026-09-04T13:00:01.250Z"
+    );
     expect(parseRunnerReceipt(replace(paused, { outputSha256: digest }))).toBeNull();
     for (const providerPause of [
       {},

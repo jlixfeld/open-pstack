@@ -1180,6 +1180,49 @@ describe("runLane", () => {
     );
   });
 
+  it("dates a pause at the observed wall time after the wall clock jumps forward", async () => {
+    process.env.FAKE_CLAUDE_PAUSE_EXIT = "1";
+    const input = options("claude", "wall-clock-forward");
+    const wallTimeMs = Date.now() - 3_600_000;
+    const beforeRun = Date.now();
+
+    const result = await runLane(input, {
+      wallTimeMs,
+      monotonicTimeMs: performance.now(),
+    });
+    const recorded = receipt(input.receiptPath);
+
+    expect(result.exitCode).toBe(75);
+    expect(recorded.startedAt).toBe(new Date(wallTimeMs).toISOString());
+    expect(recorded.elapsedMs).toBeLessThan(60_000);
+    expect(Date.parse(recorded.completedAt)).toBeGreaterThanOrEqual(beforeRun);
+    expect(
+      Date.parse(recorded.completedAt) - Date.parse(recorded.startedAt)
+    ).toBeGreaterThanOrEqual(3_600_000);
+    if (recorded.status !== "provider-paused") throw new Error("missing pause receipt");
+    expect(recorded.providerPause.observedAt).toBe(recorded.completedAt);
+  });
+
+  it("never dates a pause before its start after the wall clock rolls back", async () => {
+    process.env.FAKE_CLAUDE_PAUSE_EXIT = "1";
+    const input = options("claude", "wall-clock-backward");
+    const wallTimeMs = Date.now() + 60_000;
+
+    const result = await runLane(input, {
+      wallTimeMs,
+      monotonicTimeMs: performance.now(),
+    });
+    const recorded = receipt(input.receiptPath);
+
+    expect(result.exitCode).toBe(75);
+    expect(recorded.startedAt).toBe(new Date(wallTimeMs).toISOString());
+    expect(Date.parse(recorded.completedAt) - Date.parse(recorded.startedAt)).toBe(
+      recorded.elapsedMs
+    );
+    if (recorded.status !== "provider-paused") throw new Error("missing pause receipt");
+    expect(recorded.providerPause.observedAt).toBe(recorded.completedAt);
+  });
+
   it("spends one explicit deadline across preflight and model execution", async () => {
     process.env.FAKE_PREFLIGHT_DELAY_MS = "1200";
     process.env.FAKE_MODEL_DELAY_MS = "1200";

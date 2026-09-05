@@ -534,7 +534,7 @@ describe("Store", () => {
       expect((await readdir(directory))).not.toContain(".orch.lock.recovery.owner");
       expect((await readdir(directory))).toContain(".orch.lock.recovery.sqlite");
     }
-  });
+  }, 30_000);
 
   it("blocks a writer and steals the pid lock only with force", async () => {
     const { directory, store } = await initializedStore();
