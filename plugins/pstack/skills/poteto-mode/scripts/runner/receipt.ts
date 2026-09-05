@@ -29,6 +29,8 @@ import type {
   VerifiedManagedAttempt,
 } from "./types.ts";
 import {
+  isNonNegativeFiniteNumber,
+  isNonNegativeSafeInteger,
   SAFE_ID_PATTERN,
   SAFE_LANE_ID_PATTERN,
   SHA256_PATTERN,
@@ -292,9 +294,7 @@ function instant(value: unknown): { readonly value: string; readonly millisecond
 }
 
 function nonNegativeInteger(value: unknown): number | null {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
-    ? value
-    : null;
+  return isNonNegativeSafeInteger(value) ? value : null;
 }
 
 function nullableNonNegativeInteger(value: unknown): number | null | Invalid {
@@ -518,7 +518,7 @@ export function parseRunnerReceipt(value: unknown): RunnerReceiptV2 | null {
   const parsedUsage = usage(input.usage);
   const costUsd = input.costUsd === null
     ? null
-    : typeof input.costUsd === "number" && Number.isFinite(input.costUsd) && input.costUsd >= 0
+    : isNonNegativeFiniteNumber(input.costUsd)
       ? input.costUsd
       : invalid;
   const parsedManaged = managedAttempt(input.managedAttempt);

@@ -838,7 +838,7 @@ async function executeLane(
       provider: options.provider,
       managedAttempt,
       error: {
-        message,
+        message: evidence(message) || "provider output could not be parsed",
         evidence: evidence(`${result.stderr}\n${result.stdout}`),
       },
     });

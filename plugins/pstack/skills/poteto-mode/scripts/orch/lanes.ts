@@ -78,6 +78,16 @@ export interface LaunchPlan {
   readonly receiptPath: string;
 }
 
+export interface StalledLane {
+  readonly laneId: string;
+  readonly reason: string;
+}
+
+export interface LaneTickResult {
+  readonly plans: readonly LaunchPlan[];
+  readonly stalledLanes: readonly StalledLane[];
+}
+
 export interface LaneCheck {
   readonly unitId: string;
   readonly ready: boolean;
@@ -407,7 +417,8 @@ interface ProviderOccupancy {
 function providerBarrier(
   registry: LaneRegistry,
   provider: Provider,
-  terminalUnitIds: ReadonlySet<string>
+  terminalUnitIds: ReadonlySet<string>,
+  clock: LaneClock
 ): ProviderOccupancy | null {
   for (const lane of registry.lanes) {
     if (lane.spec.provider !== provider) continue;
@@ -415,7 +426,8 @@ function providerBarrier(
     if (
       current.kind === "claimed" ||
       (current.kind === "provider-paused" &&
-        !terminalUnitIds.has(lane.spec.unitId))
+        (!terminalUnitIds.has(lane.spec.unitId) ||
+          clock() < Date.parse(current.nextAttemptAt)))
     ) {
       return { lane, attempt: current };
     }
@@ -536,19 +548,20 @@ export async function tick(
   unitIds: ReadonlySet<string>,
   terminalUnitIds: ReadonlySet<string> = NO_TERMINAL_UNITS,
   clock: LaneClock = systemClock
-): Promise<readonly LaunchPlan[]> {
+): Promise<LaneTickResult> {
   let registry = await settleRegistry(
     store,
     await loadLaneRegistry(store, unitIds, terminalUnitIds)
   );
   const plans: LaunchPlan[] = [];
+  const stalledLanes: StalledLane[] = [];
   const providers = registry.lanes.reduce<Provider[]>((result, lane) => {
     if (!result.includes(lane.spec.provider)) result.push(lane.spec.provider);
     return result;
   }, []);
 
   for (const provider of providers) {
-    const barrier = providerBarrier(registry, provider, terminalUnitIds);
+    const barrier = providerBarrier(registry, provider, terminalUnitIds, clock);
     if (barrier !== null) {
       const current = barrier.attempt;
       if (current.kind === "claimed") {
@@ -557,15 +570,32 @@ export async function tick(
           !(await pathExists(current.outputPath)) &&
           !(await pathExists(current.receiptPath))
         ) {
-          await validateLaunchInputs(barrier.lane.spec);
-          plans.push(attemptPlan(barrier.lane.spec, current));
+          try {
+            await validateLaunchInputs(barrier.lane.spec);
+            plans.push(attemptPlan(barrier.lane.spec, current));
+          } catch (error) {
+            if (!(error instanceof UserError)) throw error;
+            stalledLanes.push({
+              laneId: barrier.lane.spec.laneId,
+              reason: error.message,
+            });
+          }
         }
         continue;
       }
+      if (terminalUnitIds.has(barrier.lane.spec.unitId)) continue;
       if (clock() < Date.parse(current.nextAttemptAt)) continue;
-      const claimed = await claimLane(store, barrier.lane, clock);
-      registry = replaceLane(registry, claimed.lane);
-      plans.push(claimed.plan);
+      try {
+        const claimed = await claimLane(store, barrier.lane, clock);
+        registry = replaceLane(registry, claimed.lane);
+        plans.push(claimed.plan);
+      } catch (error) {
+        if (!(error instanceof UserError)) throw error;
+        stalledLanes.push({
+          laneId: barrier.lane.spec.laneId,
+          reason: error.message,
+        });
+      }
       continue;
     }
 
@@ -576,13 +606,18 @@ export async function tick(
         latestAttempt(lane).kind === "registered"
     );
     if (eligible === undefined) continue;
-    const claimed = await claimLane(store, eligible, clock);
-    registry = replaceLane(registry, claimed.lane);
-    plans.push(claimed.plan);
+    try {
+      const claimed = await claimLane(store, eligible, clock);
+      registry = replaceLane(registry, claimed.lane);
+      plans.push(claimed.plan);
+    } catch (error) {
+      if (!(error instanceof UserError)) throw error;
+      stalledLanes.push({ laneId: eligible.spec.laneId, reason: error.message });
+    }
   }
 
   await saveLaneRegistry(store, registry, unitIds, terminalUnitIds);
-  return plans;
+  return { plans, stalledLanes };
 }
 
 export async function retry(
@@ -612,7 +647,12 @@ export async function retry(
     await saveLaneRegistry(store, registry, unitIds, terminalUnitIds);
     throw new UserError(`lane ${cleanLaneId} is not eligible for explicit retry`);
   }
-  const barrier = providerBarrier(registry, lane.spec.provider, terminalUnitIds);
+  const barrier = providerBarrier(
+    registry,
+    lane.spec.provider,
+    terminalUnitIds,
+    clock
+  );
   if (barrier !== null) {
     await saveLaneRegistry(store, registry, unitIds, terminalUnitIds);
     throw new UserError(

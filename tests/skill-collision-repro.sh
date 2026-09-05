@@ -243,6 +243,8 @@ for required in \
   'Duplicate wakes and session restarts' \
   'There is no TTL or inferred timeout.' \
   'Managed provider pauses are not ordinary `cap-hit` failures and do not count toward the two-retry policy below.' \
+  'Run the idempotent `orch init` for new and existing stores.' \
+  'After a session restart: run the idempotent `orch init` against the existing store' \
   'Schedulers never pass the global `--force` option; forced lock theft is an operator recovery action.'; do
   if ! grep -Fq "$required" "$orchestrate"; then
     managed_lane_bad="${managed_lane_bad}orchestrate lost managed-lane invariant: $required"$'\n'

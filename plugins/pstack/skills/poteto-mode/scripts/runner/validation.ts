@@ -6,6 +6,14 @@ export const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 export const SAFE_LANE_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 export const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
+export function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+export function isNonNegativeFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
 type RunnerRoute = Pick<
   RunnerOptions,
   "parent" | "provider" | "model" | "effort"

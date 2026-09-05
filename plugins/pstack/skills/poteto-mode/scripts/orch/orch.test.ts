@@ -369,7 +369,7 @@ describe("Store", () => {
     expect(await readdir(directory)).not.toContain(".orch.lock");
   });
 
-  it("recovers a stale recovery lock only when its holder pid is dead", async () => {
+  it("removes a stale legacy recovery PID file under the advisory guard", async () => {
     const { directory, store } = await initializedStore();
     await store.close();
     const exited = Bun.spawn(["true"]);
@@ -384,6 +384,40 @@ describe("Store", () => {
     await recovered.close();
     expect(await readdir(directory)).not.toContain(".orch.lock");
     expect(await readdir(directory)).not.toContain(".orch.lock.recovery");
+  });
+
+  it("releases the advisory recovery guard when its process is killed", async () => {
+    const { directory, store } = await initializedStore();
+    await store.close();
+    const exited = Bun.spawn(["true"]);
+    await exited.exited;
+    await writeFile(join(directory, ".orch.lock"), `${exited.pid}\n`);
+    const guardPath = join(directory, ".orch.lock.recovery.sqlite");
+    const holder = Bun.spawn([
+      process.execPath,
+      "-e",
+      'import { Database } from "bun:sqlite"; const database = new Database(process.argv[1], { create: true }); database.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE"); process.stdout.write("ready\\n"); await new Promise(() => {});',
+      guardPath,
+    ], { stdout: "pipe", stderr: "pipe" });
+    const recovered = useStore(directory);
+    try {
+      const reader = holder.stdout.getReader();
+      const ready = await reader.read();
+      reader.releaseLock();
+      expect(new TextDecoder().decode(ready.value)).toBe("ready\n");
+      await expect(
+        recovered.units.add({ id: "u1", track: "build" })
+      ).rejects.toThrow("store lock recovery is held");
+    } finally {
+      holder.kill("SIGKILL");
+      await holder.exited;
+    }
+
+    expect(
+      await recovered.units.add({ id: "u1", track: "build" })
+    ).toMatchObject({ id: "u1" });
+    await recovered.close();
+    expect(await readdir(directory)).not.toContain(".orch.lock");
   });
 
   it("serializes simultaneous stale recovery-lock takeover into one durable lane claim", async () => {
@@ -406,9 +440,6 @@ describe("Store", () => {
 
     const exited = Bun.spawn(["true"]);
     await exited.exited;
-    await writeFile(join(directory, ".orch.lock"), `${exited.pid}\n`);
-    await writeFile(join(directory, ".orch.lock.recovery"), `${exited.pid}\n`);
-    const barrier = join(directory, "tick-start");
     const command = [
       process.execPath,
       SCRIPT,
@@ -418,51 +449,61 @@ describe("Store", () => {
       "lane",
       "tick",
     ];
-    const children = Array.from({ length: 48 }, () =>
-      Bun.spawn(
-        [
-          "/bin/sh",
-          "-c",
-          'while [ ! -e "$1" ]; do :; done; shift; exec "$@"',
-          "orch-tick",
-          barrier,
-          ...command,
-        ],
-        { stdout: "pipe", stderr: "pipe" }
-      )
-    );
-    const results = children.map(async (child) => {
-      const stdout = new Response(child.stdout).text();
-      const stderr = new Response(child.stderr).text();
-      return {
-        code: await child.exited,
-        stdout: await stdout,
-        stderr: await stderr,
-      };
-    });
-    await writeFile(barrier, "go\n");
+    let durableAttemptId: string | null = null;
+    for (let round = 0; round < 8; round += 1) {
+      await writeFile(join(directory, ".orch.lock"), `${exited.pid}\n`);
+      await writeFile(join(directory, ".orch.lock.recovery"), `${exited.pid}\n`);
+      const barrier = join(directory, `tick-start-${round}`);
+      const children = Array.from({ length: 32 }, () =>
+        Bun.spawn(
+          [
+            "/bin/sh",
+            "-c",
+            'while [ ! -e "$1" ]; do :; done; shift; exec "$@"',
+            "orch-tick",
+            barrier,
+            ...command,
+          ],
+          { stdout: "pipe", stderr: "pipe" }
+        )
+      );
+      const results = children.map(async (child) => {
+        const stdout = new Response(child.stdout).text();
+        const stderr = new Response(child.stderr).text();
+        return {
+          code: await child.exited,
+          stdout: await stdout,
+          stderr: await stderr,
+        };
+      });
+      await writeFile(barrier, "go\n");
 
-    const settled = await Promise.all(results);
-    const successful = settled.filter((result) => result.code === 0);
-    expect(successful.length).toBeGreaterThan(0);
-    const attemptIds = successful.flatMap((result) =>
-      JSON.parse(result.stdout).plans.map(
-        (plan: { readonly attemptId: string }) => plan.attemptId
-      )
-    );
-    expect(attemptIds).toHaveLength(successful.length);
-    expect(new Set(attemptIds).size).toBe(1);
+      const settled = await Promise.all(results);
+      const successful = settled.filter((result) => result.code === 0);
+      expect(successful.length).toBeGreaterThan(0);
+      const attemptIds = successful.flatMap((result) =>
+        JSON.parse(result.stdout).plans.map(
+          (plan: { readonly attemptId: string }) => plan.attemptId
+        )
+      );
+      expect(attemptIds).toHaveLength(successful.length);
+      expect(new Set(attemptIds).size).toBe(1);
+      durableAttemptId ??= attemptIds[0] ?? null;
+      expect(attemptIds[0]).toBe(durableAttemptId);
 
-    const durable = JSON.parse(
-      await readFile(join(directory, "provider-lanes", "registry.json"), "utf8")
-    );
-    expect(
-      durable.lanes[0].attempts.filter(
-        (attempt: { readonly kind: string }) => attempt.kind === "claimed"
-      )
-    ).toHaveLength(1);
-    expect((await readdir(directory))).not.toContain(".orch.lock");
-    expect((await readdir(directory))).not.toContain(".orch.lock.recovery");
+      const durable = JSON.parse(
+        await readFile(join(directory, "provider-lanes", "registry.json"), "utf8")
+      );
+      expect(
+        durable.lanes[0].attempts.filter(
+          (attempt: { readonly kind: string }) => attempt.kind === "claimed"
+        )
+      ).toHaveLength(1);
+      expect((await readdir(directory))).not.toContain(".orch.lock");
+      expect((await readdir(directory))).not.toContain(".orch.lock.recovery");
+      expect((await readdir(directory))).not.toContain(".orch.lock.recovery.owner");
+      expect((await readdir(directory))).toContain(".orch.lock.recovery.sqlite");
+    }
   });
 
   it("blocks a writer and steals the pid lock only with force", async () => {
@@ -474,7 +515,7 @@ describe("Store", () => {
     const blocked = useStore(directory);
     await expect(
       blocked.units.add({ id: "u1", track: "build" })
-    ).rejects.toThrow(`store lock recovery held by pid ${process.pid}`);
+    ).rejects.toThrow(`store lock held by pid ${process.pid}`);
 
     const stolen: string[] = [];
     const forced = useStore(directory, {
@@ -681,6 +722,23 @@ describe("Store", () => {
     );
   });
 
+  it("identifies a pre-registry store as uninitialized and repairs it with init", async () => {
+    const { directory, store } = await initializedStore();
+    await store.units.add({ id: "unit", track: "test" });
+    await rm(join(directory, "provider-lanes", "registry.json"));
+    await rm(join(directory, ".orch.lane-registry.initialized"));
+
+    await expect(store.units.set({ id: "unit", state: "done" })).rejects.toThrow(
+      "run orch init"
+    );
+
+    await store.init();
+    await store.init();
+    expect(await store.units.set({ id: "unit", state: "done" })).toMatchObject({
+      state: "done",
+    });
+  });
+
   it("does not recreate a deleted provider-lanes subtree after initialization", async () => {
     const { directory, store } = await initializedStore();
     await store.units.add({ id: "unit", track: "test" });
@@ -864,6 +922,56 @@ describe("orch CLI", () => {
     ]);
     expect(unknown.code).toBe(2);
     expect(unknown.stderr).toContain("unit missing not found");
+  });
+
+  it("reports a stalled claimed lane in plain and JSON tick output", async () => {
+    const directory = await makeDirectory();
+    const prompt = join(directory, "prompt.md");
+    const cwd = join(directory, "lane-cwd");
+    await writeFile(prompt, "review this\n");
+    await mkdir(cwd);
+    expect(runCli(["--store", directory, "init"]).code).toBe(0);
+    expect(runCli([
+      "--store", directory,
+      "unit", "add", "unit",
+      "--track", "test",
+    ]).code).toBe(0);
+    expect(runCli([
+      "--store", directory,
+      "lane", "register", "review",
+      "--unit", "unit",
+      "--parent", "codex",
+      "--provider", "claude",
+      "--model", "claude-opus-5",
+      "--effort", "xhigh",
+      "--mode", "read-only",
+      "--prompt", prompt,
+      "--cwd", cwd,
+    ]).code).toBe(0);
+    expect(JSON.parse(runCli([
+      "--store", directory,
+      "--json",
+      "lane", "tick",
+    ]).stdout).plans).toHaveLength(1);
+    await rm(cwd, { recursive: true });
+
+    const plain = runCli(["--store", directory, "lane", "tick"]);
+    expect(plain).toEqual({
+      code: 0,
+      stdout: "(no launch)\n",
+      stderr: "STALLED\treview\tlane review working directory is missing or is not a directory\n",
+    });
+
+    const json = runCli(["--store", directory, "--json", "lane", "tick"]);
+    expect(json.code).toBe(0);
+    expect(json.stderr).toBe("");
+    expect(JSON.parse(json.stdout)).toEqual({
+      plans: [],
+      stalledLanes: [{
+        laneId: "review",
+        reason: "lane review working directory is missing or is not a directory",
+      }],
+    });
   });
 
   it("maps user and not-found outcomes to the preserved exit codes", async () => {

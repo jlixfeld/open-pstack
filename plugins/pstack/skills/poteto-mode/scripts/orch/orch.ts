@@ -383,9 +383,19 @@ function createProgram(io: Io): Command {
     runStore(
       program,
       io,
-      (store) => store.lanes.tick(),
-      (plans) => plans.map((plan) => `${plan.laneId}\t${plan.attemptId}`).join("\n") || "(no launch)",
-      (plans) => ({ plans })
+      async (store) => {
+        const result = await store.lanes.tick();
+        if (!program.opts<GlobalOptions>().json) {
+          for (const stalled of result.stalledLanes) {
+            io.stderr(`STALLED\t${stalled.laneId}\t${stalled.reason}\n`);
+          }
+        }
+        return result;
+      },
+      (result) =>
+        result.plans
+          .map((plan) => `${plan.laneId}\t${plan.attemptId}`)
+          .join("\n") || "(no launch)"
     )
   );
   leaf(lane, "check", "check mandatory lanes for a unit")

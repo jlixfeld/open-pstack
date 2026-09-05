@@ -162,6 +162,64 @@ describe("parseProviderOutput", () => {
     });
   });
 
+  it("omits malformed token and cost telemetry for every provider", () => {
+    const malformedUsage = {
+      input_tokens: -1,
+      cached_input_tokens: 1.5,
+      cache_creation_input_tokens: Number.MAX_SAFE_INTEGER + 1,
+      output_tokens: -2,
+      reasoning_tokens: 3.5,
+      total_tokens: Number.POSITIVE_INFINITY,
+    };
+    const cases = [
+      [
+        "claude",
+        JSON.stringify({
+          result: "CLAUDE_OK",
+          usage: malformedUsage,
+          total_cost_usd: -0.01,
+          modelUsage: { "claude-fable-5-1": {} },
+        }),
+        "",
+        "claude-fable-5-1",
+      ],
+      [
+        "codex",
+        [
+          JSON.stringify({ type: "thread.started", thread_id: "codex-session" }),
+          JSON.stringify({
+            type: "item.completed",
+            item: { type: "agent_message", text: "CODEX_OK" },
+          }),
+          JSON.stringify({ type: "turn.completed", usage: malformedUsage }),
+        ].join("\n"),
+        "",
+        "gpt-5.6-sol",
+      ],
+      [
+        "grok",
+        JSON.stringify({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: "GROK_OK",
+          usage: malformedUsage,
+          total_cost_usd: -0.02,
+          modelUsage: { "grok-4.6-build": {} },
+        }),
+        "",
+        "grok-4.6",
+      ],
+    ] as const;
+
+    for (const [provider, stdout, stderr, model] of cases) {
+      expect(parseProviderOutput(provider, stdout, stderr, model)).toMatchObject({
+        usage: null,
+        costUsd: null,
+      });
+    }
+  });
+
   it("accepts Grok's reported build suffix", () => {
     const parsed = parseProviderOutput(
       "grok",

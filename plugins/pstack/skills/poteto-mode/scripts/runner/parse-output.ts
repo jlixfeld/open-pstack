@@ -4,6 +4,10 @@ import type {
   ParsedOutput,
   Provider,
 } from "./types.ts";
+import {
+  isNonNegativeFiniteNumber,
+  isNonNegativeSafeInteger,
+} from "./validation.ts";
 
 type JsonObject = Record<string, unknown>;
 
@@ -16,8 +20,12 @@ function object(value: unknown): JsonObject | null {
     : null;
 }
 
-function finiteNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+function tokenCount(value: unknown): number | undefined {
+  return isNonNegativeSafeInteger(value) ? value : undefined;
+}
+
+function cost(value: unknown): number | null {
+  return isNonNegativeFiniteNumber(value) ? value : null;
 }
 
 function nullableString(value: unknown): string | null {
@@ -28,18 +36,18 @@ function normalizedUsage(value: unknown): NormalizedUsage | null {
   const usage = object(value);
   if (usage === null) return null;
   const result: NormalizedUsage = {
-    inputTokens: finiteNumber(usage.input_tokens),
-    cachedInputTokens: finiteNumber(
+    inputTokens: tokenCount(usage.input_tokens),
+    cachedInputTokens: tokenCount(
       usage.cached_input_tokens ?? usage.cache_read_input_tokens
     ),
-    cacheCreationInputTokens: finiteNumber(
+    cacheCreationInputTokens: tokenCount(
       usage.cache_creation_input_tokens ?? usage.cache_write_input_tokens
     ),
-    outputTokens: finiteNumber(usage.output_tokens),
-    reasoningTokens: finiteNumber(
+    outputTokens: tokenCount(usage.output_tokens),
+    reasoningTokens: tokenCount(
       usage.reasoning_tokens ?? usage.reasoning_output_tokens
     ),
-    totalTokens: finiteNumber(usage.total_tokens),
+    totalTokens: tokenCount(usage.total_tokens),
   };
   return Object.values(result).some((entry) => entry !== undefined)
     ? result
@@ -106,7 +114,7 @@ export function parseClaudePauseTelemetry(
     reportedModel: modelFromUsage(value.modelUsage, requestedModel),
     sessionId: nullableString(value.session_id ?? value.sessionId),
     usage: normalizedUsage(value.usage),
-    costUsd: finiteNumber(value.total_cost_usd) ?? null,
+    costUsd: cost(value.total_cost_usd),
   };
 }
 
@@ -129,7 +137,7 @@ function parseClaude(stdout: string, requestedModel: string): ParsedOutput {
     reportedModel: modelFromUsage(value.modelUsage, requestedModel),
     sessionId: nullableString(value.session_id ?? value.sessionId),
     usage: normalizedUsage(value.usage),
-    costUsd: finiteNumber(value.total_cost_usd) ?? null,
+    costUsd: cost(value.total_cost_usd),
   };
 }
 
@@ -159,7 +167,7 @@ function parseGrok(stdout: string, requestedModel: string): ParsedOutput {
     reportedModel: modelFromUsage(result.modelUsage, requestedModel),
     sessionId: nullableString(result.session_id),
     usage: normalizedUsage(result.usage),
-    costUsd: finiteNumber(result.total_cost_usd) ?? null,
+    costUsd: cost(result.total_cost_usd),
   };
 }
 

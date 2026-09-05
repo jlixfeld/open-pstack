@@ -574,6 +574,11 @@ export async function loadLaneRegistry(
 ): Promise<LaneRegistry> {
   const path = laneRegistryPath(store);
   if (!(await pathExists(path))) {
+    if (!(await pathExists(resolve(store, LANE_REGISTRY_SENTINEL)))) {
+      throw new UserError(
+        `store is not initialized at ${store}; run orch init`
+      );
+    }
     throw new UserError(
       "provider lane registry is missing; the orchestrate store is corrupt"
     );

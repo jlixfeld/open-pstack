@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
 import {
+  chmod,
   mkdir,
   open,
   readFile,
@@ -11,6 +12,7 @@ import {
   unlink,
 } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import { Database } from "bun:sqlite";
 import {
   checkUnit,
   register as registerLane,
@@ -20,6 +22,7 @@ import {
   type Lane,
   type LaneCheck,
   type LaneClock,
+  type LaneTickResult,
   type LaunchPlan,
   type RegisterParams,
 } from "./lanes.ts";
@@ -45,6 +48,7 @@ const UNIT_HEADER = "id\ttrack\tstate\tbranch\tpr\tsha\tbrief";
 const LEDGER_HEADER = "pr\tsha\tverdict\tevidence\tverifier\tts";
 const LOCK_FILE = ".orch.lock";
 const LOCK_RECOVERY_FILE = ".orch.lock.recovery";
+const LOCK_RECOVERY_GUARD_FILE = ".orch.lock.recovery.sqlite";
 
 export const TERMINAL_RECONCILIATION_STATES = [
   "abandoned",
@@ -217,7 +221,7 @@ export interface OpenStoreOptions {
 export interface Store {
   readonly lanes: {
     readonly register: (params: RegisterParams) => Promise<Lane>;
-    readonly tick: () => Promise<readonly LaunchPlan[]>;
+    readonly tick: () => Promise<LaneTickResult>;
     readonly check: (unitId: string) => Promise<LaneCheck>;
     readonly retry: (laneId: string) => Promise<LaunchPlan>;
     readonly release: (params: {
@@ -434,77 +438,42 @@ async function releaseOwnedLock(path: string, pid: string): Promise<void> {
   }
 }
 
-async function acquireRecoveryLock(
-  store: string,
-  pid: string,
-  force: boolean
-): Promise<() => Promise<void>> {
-  const path = join(store, LOCK_RECOVERY_FILE);
+async function acquireRecoveryLock(store: string): Promise<() => Promise<void>> {
+  const guardPath = join(store, LOCK_RECOVERY_GUARD_FILE);
+  const database = new Database(guardPath, { create: true, strict: true });
   try {
-    await writePidLock(path, pid);
+    await chmod(guardPath, 0o600);
+    database.exec("PRAGMA busy_timeout = 0");
+    database.exec("BEGIN IMMEDIATE");
   } catch (error) {
-    if (errorCode(error) !== "EEXIST") throw error;
-    const holder = (await readLockHolder(path)) ?? "unknown";
-    if (!force && !holderIsDead(holder)) {
-      throw new UserError(`store lock recovery held by pid ${holder}`);
-    }
-
-    const currentHolder = await readLockHolder(path);
+    database.close();
     if (
-      currentHolder !== holder ||
-      (!force && !holderIsDead(currentHolder))
+      errorCode(error) === "SQLITE_BUSY" ||
+      errorCode(error) === "SQLITE_LOCKED"
     ) {
-      throw new UserError(
-        `store lock recovery held by pid ${currentHolder ?? "unknown"}`
-      );
+      throw new UserError("store lock recovery is held");
     }
-
-    const displacedPath = join(
-      store,
-      `${LOCK_RECOVERY_FILE}.${pid}.${randomUUID()}.stale`
-    );
-    try {
-      await rename(path, displacedPath);
-    } catch (renameError) {
-      if (errorCode(renameError) !== "ENOENT") throw renameError;
-      const current = (await readLockHolder(path)) ?? "unknown";
-      throw new UserError(`store lock recovery held by pid ${current}`);
-    }
-
-    let ownsLock = false;
-    try {
-      try {
-        await writePidLock(path, pid);
-        ownsLock = true;
-      } catch (createError) {
-        if (errorCode(createError) !== "EEXIST") throw createError;
-        const current = (await readLockHolder(path)) ?? "unknown";
-        throw new UserError(`store lock recovery held by pid ${current}`);
-      }
-
-      const displacedHolder = (await readLockHolder(displacedPath)) ?? "unknown";
-      if (
-        displacedHolder !== holder ||
-        (!force && !holderIsDead(displacedHolder))
-      ) {
-        await rename(displacedPath, path);
-        ownsLock = false;
-        throw new UserError(
-          `store lock recovery held by pid ${displacedHolder}`
-        );
-      }
-    } finally {
-      await rm(displacedPath, { force: true });
-      if (ownsLock && (await readLockHolder(path)) !== pid) {
-        ownsLock = false;
-      }
-    }
-    if (!ownsLock) {
-      const current = (await readLockHolder(path)) ?? "unknown";
-      throw new UserError(`store lock recovery held by pid ${current}`);
-    }
+    throw error;
   }
-  return () => releaseOwnedLock(path, pid);
+
+  try {
+    await rm(join(store, LOCK_RECOVERY_FILE), { force: true });
+  } catch (error) {
+    try {
+      database.exec("ROLLBACK");
+    } finally {
+      database.close();
+    }
+    throw error;
+  }
+
+  return async () => {
+    try {
+      database.exec("COMMIT");
+    } finally {
+      database.close();
+    }
+  };
 }
 
 async function acquireLock(
@@ -538,21 +507,10 @@ async function acquireLock(
     if (errorCode(error) !== "EEXIST") {
       throw error;
     }
-    const releaseRecovery = await acquireRecoveryLock(
-      store,
-      pid,
-      options.force === true
-    );
+    const releaseRecovery = await acquireRecoveryLock(store);
     try {
-      const ensureRecoveryOwnership = async (): Promise<void> => {
-        if (await readLockHolder(join(store, LOCK_RECOVERY_FILE)) !== pid) {
-          throw new UserError("store lock recovery ownership changed");
-        }
-      };
-      await ensureRecoveryOwnership();
       const holder = await readLockHolder(path);
       if (holder === null) {
-        await ensureRecoveryOwnership();
         try {
           await create();
         } catch (retryError) {
@@ -561,11 +519,9 @@ async function acquireLock(
         }
       } else if (holderIsDead(holder)) {
         options.onStaleLock?.(holder);
-        await ensureRecoveryOwnership();
         await replace();
       } else if (options.force) {
         options.onLockStolen?.(holder);
-        await ensureRecoveryOwnership();
         await replace();
       } else {
         throw new UserError(`store lock held by pid ${holder}`);

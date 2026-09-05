@@ -114,6 +114,14 @@ if (name === "grok" && args[0] === "models") {
 }
 const modelIndex = args.findIndex((value) => value === "--model");
 const model = modelIndex >= 0 ? args[modelIndex + 1] : "unknown";
+const malformedUsage = {
+  input_tokens: -1,
+  cached_input_tokens: 1.5,
+  cache_creation_input_tokens: Number.MAX_SAFE_INTEGER + 1,
+  output_tokens: -2,
+  reasoning_output_tokens: 3.5,
+  total_tokens: Number.POSITIVE_INFINITY,
+};
 if (stage === "model" && process.env.FAKE_INVOCATION_LOG_PATH) {
   const promptBytes = name === "grok"
     ? new Uint8Array()
@@ -161,11 +169,15 @@ if (name === "claude") {
     }
     process.exit(Number(process.env.FAKE_CLAUDE_PAUSE_EXIT));
   }
-  console.log(JSON.stringify({result:"CLAUDE_OK",session_id:"c1",usage:{input_tokens:10,output_tokens:2},total_cost_usd:0.01,modelUsage:{[model]:{}}}));
+  console.log(JSON.stringify({result:"CLAUDE_OK",session_id:"c1",usage:process.env.FAKE_MALFORMED_TELEMETRY === "1" ? malformedUsage : {input_tokens:10,output_tokens:2},total_cost_usd:process.env.FAKE_MALFORMED_TELEMETRY === "1" ? -0.01 : 0.01,modelUsage:{[model]:{}}}));
 } else if (name === "codex") {
   console.log(JSON.stringify({type:"thread.started",thread_id:"o1"}));
+  if (process.env.FAKE_CODEX_FAILURE_LENGTH) {
+    console.log(JSON.stringify({type:"turn.failed",error:{message:"x".repeat(Number(process.env.FAKE_CODEX_FAILURE_LENGTH))}}));
+    process.exit(0);
+  }
   console.log(JSON.stringify({type:"item.completed",item:{type:"agent_message",text:"CODEX_OK"}}));
-  console.log(JSON.stringify({type:"turn.completed",usage:{input_tokens:20,cached_input_tokens:5,output_tokens:3,reasoning_output_tokens:1}}));
+  console.log(JSON.stringify({type:"turn.completed",usage:process.env.FAKE_MALFORMED_TELEMETRY === "1" ? malformedUsage : {input_tokens:20,cached_input_tokens:5,output_tokens:3,reasoning_output_tokens:1}}));
 } else {
   console.log(JSON.stringify({type:"assistant",message:{content:[{type:"text",text:"progress"}]}}));
   console.log(JSON.stringify({type:"result",subtype:"success",is_error:false,result:"GROK_OK",session_id:"g1",usage:{input_tokens:30,output_tokens:4,total_tokens:34},total_cost_usd:0.02,modelUsage:{[model + "-build"]:{}}}));
@@ -364,6 +376,8 @@ beforeEach(() => {
   delete process.env.FAKE_CLAUDE_PAUSE_RESULT;
   delete process.env.FAKE_INVOCATION_LOG_PATH;
   delete process.env.FAKE_CLAUDE_PAUSE_WAIT_FOR_SIGNAL;
+  delete process.env.FAKE_CODEX_FAILURE_LENGTH;
+  delete process.env.FAKE_MALFORMED_TELEMETRY;
 });
 
 afterEach(() => {
@@ -396,6 +410,8 @@ afterEach(() => {
   delete process.env.FAKE_CLAUDE_PAUSE_RESULT;
   delete process.env.FAKE_INVOCATION_LOG_PATH;
   delete process.env.FAKE_CLAUDE_PAUSE_WAIT_FOR_SIGNAL;
+  delete process.env.FAKE_CODEX_FAILURE_LENGTH;
+  delete process.env.FAKE_MALFORMED_TELEMETRY;
   rmSync(scratch, { recursive: true, force: true });
 });
 
@@ -693,6 +709,24 @@ describe("runLane", () => {
     expect(recorded.outputSha256).toBe(sha256Hex(readFileSync(input.outputPath)));
   });
 
+  it("round-trips managed receipts after omitting malformed provider telemetry", async () => {
+    process.env.FAKE_MALFORMED_TELEMETRY = "1";
+    for (const provider of ["claude", "codex"] as const) {
+      const input = withManagedAttempt(options(provider, `managed-malformed-${provider}`));
+
+      const result = await runLane(input);
+      const recorded = receipt(input.receiptPath);
+
+      expect(result.exitCode).toBe(0);
+      expect(recorded).toMatchObject({
+        status: "complete",
+        managedAttempt: { ...input.managedAttempt, verified: true },
+        usage: null,
+        costUsd: null,
+      });
+    }
+  });
+
   it("hashes and sends the exact managed prompt bytes", async () => {
     const bytes = Uint8Array.from([0xff, 0x00, 0x61, 0x0a]);
     writeFileSync(join(scratch, "prompt.md"), bytes);
@@ -742,6 +776,19 @@ describe("runLane", () => {
       modelVerified: false,
       modelEvidence: "pinned-argv",
     });
+  });
+
+  it("bounds a provider parse failure so the serialized receipt remains valid", async () => {
+    process.env.FAKE_CODEX_FAILURE_LENGTH = "5000";
+    const input = options("codex", "long-provider-error");
+
+    const result = await runLane(input);
+    const recorded = receipt(input.receiptPath);
+
+    expect(result.exitCode).toBe(65);
+    expect(recorded.status).toBe("malformed-output");
+    expect(recorded.error?.message).toHaveLength(4_000);
+    expect(recorded.error?.evidence.length).toBeLessThanOrEqual(4_000);
   });
 
   it("classifies an unavailable model without falling back", async () => {

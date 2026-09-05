@@ -176,7 +176,7 @@ function failureReceipt(
 ): RunnerReceiptV2 {
   const input = runnerOptions(plan);
   return buildReceipt(input, {
-    ...processDetails(input, completedAt, 1),
+    ...processDetails(input, completedAt, status === "malformed-output" ? 0 : 1),
     status,
     provider: input.provider,
     managedAttempt: verifiedAttempt(input),
@@ -227,6 +227,10 @@ async function finishFailure(plan: LaunchPlan): Promise<void> {
   await writeJson(plan.receiptPath, failureReceipt(plan));
 }
 
+async function tickPlans(store: Store): Promise<readonly LaunchPlan[]> {
+  return (await store.lanes.tick()).plans;
+}
+
 async function registry(directory: string): Promise<any> {
   return JSON.parse(
     await readFile(join(directory, "provider-lanes", "registry.json"), "utf8")
@@ -275,7 +279,7 @@ describe("managed provider lane registration", () => {
     const bytes = Uint8Array.from([0xff, 0x00, 0x61, 0x0a]);
     const { directory, store, prompt } = await fixture(bytes);
     const lane = await store.lanes.register(registration(prompt));
-    const [plan] = await store.lanes.tick();
+    const [plan] = await tickPlans(store);
     if (plan === undefined) throw new Error("missing plan");
 
     expect([...(await readFile(lane.spec.promptPath))]).toEqual([...bytes]);
@@ -386,7 +390,7 @@ describe("managed provider lane registration", () => {
       intervalSeconds: 3_600,
       timeoutSeconds: 5_400,
     }));
-    const [plan] = await store.lanes.tick();
+    const [plan] = await tickPlans(store);
     if (plan === undefined) throw new Error("missing plan");
     expect(lane.spec.retryIntervalMs).toBe(3_600_000);
     expect(lane.spec.timeoutMs).toBe(5_400_000);
@@ -404,11 +408,11 @@ describe("managed provider lane scheduling", () => {
     await store.lanes.register(registration(prompt));
 
     setNow(START - 5_000);
-    const [plan] = await store.lanes.tick();
+    const [plan] = await tickPlans(store);
     if (plan === undefined) throw new Error("missing plan");
     await finishComplete(plan, START - 1_000);
 
-    expect(await store.lanes.tick()).toEqual([]);
+    expect(await tickPlans(store)).toEqual([]);
     expect((await registry(directory)).lanes[0].attempts.at(-1).kind).toBe(
       "complete"
     );
@@ -425,7 +429,7 @@ describe("managed provider lane scheduling", () => {
     await expectRegistryRoundTrip(directory);
 
     setNow(START - 5_000);
-    const [claimed] = await store.lanes.tick();
+    const [claimed] = await tickPlans(store);
     if (claimed === undefined) throw new Error("missing claimed plan");
     let value = await expectRegistryRoundTrip(directory);
     expect(value.lanes[0].attempts.at(-1).claimedAt).toBe(
@@ -454,12 +458,12 @@ describe("managed provider lane scheduling", () => {
   it("clamps an explicit retry to a runner failure transition after clock rollback", async () => {
     const { directory, store, prompt, setNow } = await fixture();
     await store.lanes.register(registration(prompt));
-    const [plan] = await store.lanes.tick();
+    const [plan] = await tickPlans(store);
     if (plan === undefined) throw new Error("missing plan");
     await finishFailure(plan);
 
     setNow(START - 5_000);
-    expect(await store.lanes.tick()).toEqual([]);
+    expect(await tickPlans(store)).toEqual([]);
     let value = await expectRegistryRoundTrip(directory);
     expect(value.lanes[0].attempts.at(-1).completedAt).toBe(
       new Date(START + 5_000).toISOString()
@@ -475,12 +479,12 @@ describe("managed provider lane scheduling", () => {
   it("replays the same unreserved plan after restart", async () => {
     const { directory, store, prompt } = await fixture();
     await store.lanes.register(registration(prompt));
-    const first = await store.lanes.tick();
+    const first = await tickPlans(store);
     await store.close();
 
     const restarted = openStore(directory, { now: () => START });
     stores.push(restarted);
-    expect(await restarted.lanes.tick()).toEqual(first);
+    expect(await tickPlans(restarted)).toEqual(first);
   });
 
   it("does not relaunch when either artifact exists", async () => {
@@ -495,11 +499,11 @@ describe("managed provider lane scheduling", () => {
       model: "gpt-5.6-sol",
       effort: "max",
     }));
-    const plans = await store.lanes.tick();
+    const plans = await tickPlans(store);
     expect(plans).toHaveLength(2);
     await writeFile(plans[0]!.outputPath, "reserved");
     await writeFile(plans[1]!.receiptPath, "{");
-    expect(await store.lanes.tick()).toEqual([]);
+    expect(await tickPlans(store)).toEqual([]);
   });
 
   it("keeps provider-wide single-flight across duplicate wakes", async () => {
@@ -511,21 +515,21 @@ describe("managed provider lane scheduling", () => {
       unitId: "unit-two",
     }));
 
-    const firstWake = await store.lanes.tick();
+    const firstWake = await tickPlans(store);
     expect(firstWake).toHaveLength(1);
     expect(firstWake[0]?.laneId).toBe("first");
-    expect(await store.lanes.tick()).toEqual(firstWake);
+    expect(await tickPlans(store)).toEqual(firstWake);
   });
 
   it("schedules from observedAt, does not retry early, and reuses the due probe plan", async () => {
     const { directory, store, prompt, setNow } = await fixture();
     await store.lanes.register(registration(prompt));
-    const [first] = await store.lanes.tick();
+    const [first] = await tickPlans(store);
     if (first === undefined) throw new Error("missing plan");
     const observedAt = START + 5_000;
     await finishPause(first, observedAt);
     setNow(START + 20 * 60_000);
-    expect(await store.lanes.tick()).toEqual([]);
+    expect(await tickPlans(store)).toEqual([]);
 
     let paused = (await registry(directory)).lanes[0].attempts.at(-1);
     expect(paused).toMatchObject({
@@ -534,17 +538,17 @@ describe("managed provider lane scheduling", () => {
       nextAttemptAt: new Date(observedAt + 1_800_000).toISOString(),
     });
     setNow(observedAt + 1_800_000 - 1);
-    expect(await store.lanes.tick()).toEqual([]);
+    expect(await tickPlans(store)).toEqual([]);
     expect((await registry(directory)).lanes[0].attempts.at(-1)).toEqual(paused);
 
     setNow(observedAt + 1_800_000);
-    const [due] = await store.lanes.tick();
+    const [due] = await tickPlans(store);
     if (due === undefined) throw new Error("missing due plan");
     expect(due.laneId).toBe(first.laneId);
     expect(due.attemptId).not.toBe(first.attemptId);
     expect(due.outputPath).not.toBe(first.outputPath);
     expect(due.receiptPath).not.toBe(first.receiptPath);
-    expect(await store.lanes.tick()).toEqual([due]);
+    expect(await tickPlans(store)).toEqual([due]);
     paused = (await registry(directory)).lanes[0].attempts.at(-2);
     expect(paused.nextAttemptAt).toBe(new Date(observedAt + 1_800_000).toISOString());
   });
@@ -552,12 +556,12 @@ describe("managed provider lane scheduling", () => {
   it("applies the configured interval from the receipt observation", async () => {
     const { directory, store, prompt, setNow } = await fixture();
     await store.lanes.register(registration(prompt, { intervalSeconds: 3_600 }));
-    const [plan] = await store.lanes.tick();
+    const [plan] = await tickPlans(store);
     if (plan === undefined) throw new Error("missing plan");
     const observedAt = START + 5_000;
     await finishPause(plan, observedAt);
     setNow(observedAt + 30_000);
-    await store.lanes.tick();
+    await tickPlans(store);
     const paused = (await registry(directory)).lanes[0].attempts.at(-1);
     expect(Date.parse(paused.nextAttemptAt) - Date.parse(paused.observedAt)).toBe(3_600_000);
   });
@@ -565,18 +569,18 @@ describe("managed provider lane scheduling", () => {
   it("blocks explicit retry while a sibling is claimed or provider-paused", async () => {
     const { store, prompt, setNow } = await fixture();
     await store.lanes.register(registration(prompt, { laneId: "failed" }));
-    const [failed] = await store.lanes.tick();
+    const [failed] = await tickPlans(store);
     if (failed === undefined) throw new Error("missing plan");
     await finishFailure(failed);
     setNow(START + 5_000);
-    await store.lanes.tick();
+    await tickPlans(store);
 
     await store.units.add({ id: "unit-two", track: "test" });
     await store.lanes.register(registration(prompt, {
       laneId: "probe",
       unitId: "unit-two",
     }));
-    const [probe] = await store.lanes.tick();
+    const [probe] = await tickPlans(store);
     if (probe === undefined) throw new Error("missing probe");
     await expect(store.lanes.retry("failed")).rejects.toThrow(
       "provider claude is occupied by lane probe"
@@ -584,12 +588,12 @@ describe("managed provider lane scheduling", () => {
 
     await finishPause(probe, START + 10_000);
     setNow(START + 10_000);
-    await store.lanes.tick();
+    await tickPlans(store);
     await expect(store.lanes.retry("failed")).rejects.toThrow(
       "provider claude is occupied by lane probe"
     );
     setNow(START + 10_000 + 1_800_000);
-    expect((await store.lanes.tick())[0]?.laneId).toBe("probe");
+    expect((await tickPlans(store))[0]?.laneId).toBe("probe");
   });
 
   it("skips registered lanes on terminal reconciliation units without clearing their gates", async () => {
@@ -598,7 +602,7 @@ describe("managed provider lane scheduling", () => {
       await store.lanes.register(registration(prompt));
       await store.units.set({ id: "unit", state });
 
-      expect(await store.lanes.tick()).toEqual([]);
+      expect(await tickPlans(store)).toEqual([]);
       expect((await registry(directory)).lanes[0].attempts.at(-1).kind).toBe(
         "registered"
       );
@@ -616,11 +620,11 @@ describe("managed provider lane scheduling", () => {
   it("lets a live sibling bypass a due pause owned by a terminal unit", async () => {
     const { directory, store, prompt, setNow } = await fixture();
     await store.lanes.register(registration(prompt, { laneId: "dead-pause" }));
-    const [first] = await store.lanes.tick();
+    const [first] = await tickPlans(store);
     if (first === undefined) throw new Error("missing first plan");
     await finishPause(first);
     setNow(START + 5_000);
-    await store.lanes.tick();
+    await tickPlans(store);
     await store.units.set({ id: "unit", state: "abandoned" });
 
     await store.units.add({ id: "live-unit", track: "test" });
@@ -628,22 +632,33 @@ describe("managed provider lane scheduling", () => {
       laneId: "live-review",
       unitId: "live-unit",
     }));
+    setNow(START + 5_000 + 60_000);
+    expect(await tickPlans(store)).toEqual([]);
+
     setNow(START + 5_000 + 1_800_000);
 
-    const [plan] = await store.lanes.tick();
-    expect(plan?.laneId).toBe("live-review");
+    const [plan] = await tickPlans(store);
+    if (plan === undefined) throw new Error("missing live sibling plan");
+    expect(plan.laneId).toBe("live-review");
     const value = await registry(directory);
     expect(value.lanes.find((lane: any) => lane.spec.laneId === "dead-pause")
       .attempts.at(-1).kind).toBe("provider-paused");
     expect(value.lanes.find((lane: any) => lane.spec.laneId === "live-review")
       .attempts.at(-1).kind).toBe("claimed");
+
+    await finishComplete(plan);
+    setNow(START + 5_000 + 1_800_001);
+    expect(await tickPlans(store)).toEqual([]);
+    expect((await registry(directory)).lanes.find(
+      (lane: any) => lane.spec.laneId === "dead-pause"
+    ).attempts.at(-1).kind).toBe("provider-paused");
   });
 
   it("rejects retry on terminal units without starving a live sibling", async () => {
     for (const state of ["abandoned", "zombie-reconciled"] as const) {
       const { directory, store, prompt } = await fixture();
       await store.lanes.register(registration(prompt, { laneId: "dead-review" }));
-      const [failed] = await store.lanes.tick();
+      const [failed] = await tickPlans(store);
       if (failed === undefined) throw new Error("missing failed plan");
       await finishFailure(failed);
       await store.units.set({ id: "unit", state });
@@ -657,7 +672,7 @@ describe("managed provider lane scheduling", () => {
       await expect(store.lanes.retry("dead-review")).rejects.toThrow(
         `unit unit is ${state}`
       );
-      const [live] = await store.lanes.tick();
+      const [live] = await tickPlans(store);
       expect(live?.laneId).toBe("live-review");
 
       const value = await registry(directory);
@@ -671,7 +686,7 @@ describe("managed provider lane scheduling", () => {
   it("keeps a terminal unit's claimed child provider-occupying", async () => {
     const { directory, store, prompt } = await fixture();
     await store.lanes.register(registration(prompt, { laneId: "dead-claim" }));
-    const [claimed] = await store.lanes.tick();
+    const [claimed] = await tickPlans(store);
     if (claimed === undefined) throw new Error("missing claimed plan");
     await store.units.set({ id: "unit", state: "zombie-reconciled" });
     await store.units.add({ id: "live-unit", track: "test" });
@@ -680,7 +695,7 @@ describe("managed provider lane scheduling", () => {
       unitId: "live-unit",
     }));
 
-    expect(await store.lanes.tick()).toEqual([]);
+    expect(await tickPlans(store)).toEqual([]);
     const value = await registry(directory);
     expect(value.lanes.find((lane: any) => lane.spec.laneId === "dead-claim")
       .attempts.at(-1).kind).toBe("claimed");
@@ -688,7 +703,7 @@ describe("managed provider lane scheduling", () => {
       .attempts.at(-1).kind).toBe("registered");
   });
 
-  it("refuses to replay a claim after its immutable prompt or cwd is lost", async () => {
+  it("holds and reports a claim after its immutable prompt or cwd is lost", async () => {
     for (const corruption of [
       "missing-prompt",
       "changed-prompt",
@@ -700,7 +715,7 @@ describe("managed provider lane scheduling", () => {
       const cwd = join(directory, `cwd-${corruption}`);
       await mkdir(cwd);
       const lane = await store.lanes.register(registration(prompt, { cwd }));
-      const [plan] = await store.lanes.tick();
+      const [plan] = await tickPlans(store);
       if (plan === undefined) throw new Error(`missing plan for ${corruption}`);
 
       if (corruption === "missing-prompt") {
@@ -726,12 +741,72 @@ describe("managed provider lane scheduling", () => {
 
       expect(await stat(plan.outputPath).catch(() => null)).toBeNull();
       expect(await stat(plan.receiptPath).catch(() => null)).toBeNull();
-      await expect(store.lanes.tick()).rejects.toThrow(`lane ${lane.spec.laneId}`);
-      await expect(store.lanes.tick()).rejects.toThrow(`lane ${lane.spec.laneId}`);
+      const firstTick = await store.lanes.tick();
+      expect(firstTick.plans).toEqual([]);
+      expect(firstTick.stalledLanes).toEqual([{
+        laneId: lane.spec.laneId,
+        reason: expect.stringContaining(`lane ${lane.spec.laneId}`),
+      }]);
+      expect(await store.lanes.tick()).toEqual(firstTick);
       expect((await registry(directory)).lanes[0].attempts.at(-1).kind).toBe(
         "claimed"
       );
     }
+  });
+
+  it("reports one lost-input claim, settles receipts, and continues healthy providers", async () => {
+    const { directory, store, prompt } = await fixture();
+    const lostCwd = join(directory, "lost-cwd");
+    await mkdir(lostCwd);
+    await store.units.add({ id: "codex-complete-unit", track: "test" });
+    await store.units.add({ id: "codex-next-unit", track: "test" });
+    await store.lanes.register(registration(prompt, {
+      laneId: "lost-claude",
+      cwd: lostCwd,
+    }));
+    await store.lanes.register(registration(prompt, {
+      laneId: "codex-complete",
+      unitId: "codex-complete-unit",
+      parent: "claude",
+      provider: "codex",
+      model: "gpt-5.6-sol",
+      effort: "max",
+    }));
+    await store.lanes.register(registration(prompt, {
+      laneId: "codex-next",
+      unitId: "codex-next-unit",
+      parent: "claude",
+      provider: "codex",
+      model: "gpt-5.6-sol",
+      effort: "max",
+    }));
+
+    const first = await tickPlans(store);
+    const lostPlan = first.find((plan) => plan.laneId === "lost-claude");
+    const completedPlan = first.find((plan) => plan.laneId === "codex-complete");
+    if (lostPlan === undefined || completedPlan === undefined) {
+      throw new Error("missing initial provider plans");
+    }
+    await finishComplete(completedPlan);
+    await rm(lostCwd, { recursive: true });
+
+    const result = await store.lanes.tick();
+
+    expect(result.plans.map((plan) => plan.laneId)).toEqual(["codex-next"]);
+    expect(result.stalledLanes).toEqual([{
+      laneId: "lost-claude",
+      reason: "lane lost-claude working directory is missing or is not a directory",
+    }]);
+    const value = await registry(directory);
+    expect(value.lanes.find((lane: any) => lane.spec.laneId === "lost-claude")
+      .attempts.at(-1)).toMatchObject({
+        kind: "claimed",
+        attemptId: lostPlan.attemptId,
+      });
+    expect(value.lanes.find((lane: any) => lane.spec.laneId === "codex-complete")
+      .attempts.at(-1).kind).toBe("complete");
+    expect(value.lanes.find((lane: any) => lane.spec.laneId === "codex-next")
+      .attempts.at(-1).kind).toBe("claimed");
   });
 });
 
@@ -743,11 +818,11 @@ describe("managed provider lane outcomes and gates", () => {
       "not eligible"
     );
 
-    const [plan] = await store.lanes.tick();
+    const [plan] = await tickPlans(store);
     if (plan === undefined) throw new Error("missing plan");
     await finishComplete(plan);
     setNow(START + 5_000);
-    await store.lanes.tick();
+    await tickPlans(store);
     await expect(store.lanes.retry("claude-review")).rejects.toThrow(
       "not eligible"
     );
@@ -756,20 +831,20 @@ describe("managed provider lane outcomes and gates", () => {
   it("runs pause to due retry to continuously validated completion", async () => {
     const { store, prompt, setNow } = await fixture();
     await store.lanes.register(registration(prompt));
-    const [first] = await store.lanes.tick();
+    const [first] = await tickPlans(store);
     if (first === undefined) throw new Error("missing plan");
     await finishPause(first);
     setNow(START + 5_000);
-    await store.lanes.tick();
+    await tickPlans(store);
     expect((await store.lanes.check("unit")).blockingLaneIds).toEqual([
       "claude-review",
     ]);
 
     setNow(START + 5_000 + 1_800_000);
-    const [retry] = await store.lanes.tick();
+    const [retry] = await tickPlans(store);
     if (retry === undefined) throw new Error("missing retry");
     await finishComplete(retry, START + 5_000 + 1_800_000 + 2_000);
-    await store.lanes.tick();
+    await tickPlans(store);
     expect(await store.lanes.check("unit")).toEqual({
       unitId: "unit",
       ready: true,
@@ -780,11 +855,11 @@ describe("managed provider lane outcomes and gates", () => {
   it("requires explicit retry for ordinary failure and uses fresh artifacts", async () => {
     const { store, prompt, setNow } = await fixture();
     await store.lanes.register(registration(prompt));
-    const [first] = await store.lanes.tick();
+    const [first] = await tickPlans(store);
     if (first === undefined) throw new Error("missing plan");
     await finishFailure(first);
     setNow(START + 5_000);
-    expect(await store.lanes.tick()).toEqual([]);
+    expect(await tickPlans(store)).toEqual([]);
 
     const retry = await store.lanes.retry(first.laneId);
     expect(retry.attemptId).not.toBe(first.attemptId);
@@ -792,13 +867,26 @@ describe("managed provider lane outcomes and gates", () => {
     expect(retry.receiptPath).not.toBe(first.receiptPath);
   });
 
+  it("settles a valid malformed-output receipt as a failed attempt", async () => {
+    const { directory, store, prompt } = await fixture();
+    await store.lanes.register(registration(prompt));
+    const [plan] = await tickPlans(store);
+    if (plan === undefined) throw new Error("missing plan");
+    await writeJson(plan.receiptPath, failureReceipt(plan, "malformed-output"));
+
+    expect(await store.lanes.tick()).toEqual({ plans: [], stalledLanes: [] });
+    expect((await registry(directory)).lanes[0].attempts.at(-1).kind).toBe(
+      "failed"
+    );
+  });
+
   it("holds an identity-failure receipt until authoritative release", async () => {
     const { directory, store, prompt } = await fixture();
     await store.lanes.register(registration(prompt));
-    const [plan] = await store.lanes.tick();
+    const [plan] = await tickPlans(store);
     if (plan === undefined) throw new Error("missing plan");
     await writeJson(plan.receiptPath, identityFailureReceipt(plan));
-    expect(await store.lanes.tick()).toEqual([]);
+    expect(await tickPlans(store)).toEqual([]);
     expect((await registry(directory)).lanes[0].attempts.at(-1).kind).toBe("claimed");
     expect((await store.lanes.check("unit")).ready).toBe(false);
 
@@ -813,11 +901,11 @@ describe("managed provider lane outcomes and gates", () => {
   it("never infers a dead claim and refuses stale release", async () => {
     const { store, prompt, setNow } = await fixture();
     await store.lanes.register(registration(prompt));
-    const [plan] = await store.lanes.tick();
+    const [plan] = await tickPlans(store);
     if (plan === undefined) throw new Error("missing plan");
     await writeFile(plan.outputPath, "");
     setNow(Date.parse("2036-09-04T12:00:00.000Z"));
-    expect(await store.lanes.tick()).toEqual([]);
+    expect(await tickPlans(store)).toEqual([]);
     await expect(store.lanes.release({
       laneId: plan.laneId,
       attemptId: "stale-attempt",
@@ -834,7 +922,7 @@ describe("managed provider lane outcomes and gates", () => {
     for (const terminal of ["complete", "pause"] as const) {
       const { store, prompt, setNow } = await fixture();
       await store.lanes.register(registration(prompt));
-      const [plan] = await store.lanes.tick();
+      const [plan] = await tickPlans(store);
       if (plan === undefined) throw new Error("missing plan");
       if (terminal === "complete") await finishComplete(plan);
       else await finishPause(plan);
@@ -877,11 +965,11 @@ describe("managed provider lane outcomes and gates", () => {
   it("revalidates prompt, receipt, and output bytes after completion", async () => {
     const { store, prompt, setNow } = await fixture();
     const lane = await store.lanes.register(registration(prompt));
-    const [plan] = await store.lanes.tick();
+    const [plan] = await tickPlans(store);
     if (plan === undefined) throw new Error("missing plan");
     await finishComplete(plan);
     setNow(START + 5_000);
-    await store.lanes.tick();
+    await tickPlans(store);
     expect((await store.lanes.check("unit")).ready).toBe(true);
 
     const originalPrompt = await readFile(lane.spec.promptPath);
@@ -902,19 +990,19 @@ describe("managed provider lane outcomes and gates", () => {
   it("holds a complete receipt when output changes before first reconciliation", async () => {
     const { directory, store, prompt } = await fixture();
     await store.lanes.register(registration(prompt));
-    const [plan] = await store.lanes.tick();
+    const [plan] = await tickPlans(store);
     if (plan === undefined) throw new Error("missing plan");
     await finishComplete(plan);
     await writeFile(plan.outputPath, "tampered before reconciliation\n");
 
-    expect(await store.lanes.tick()).toEqual([]);
+    expect(await tickPlans(store)).toEqual([]);
     expect((await registry(directory)).lanes[0].attempts.at(-1).kind).toBe(
       "claimed"
     );
     expect((await store.lanes.check("unit")).ready).toBe(false);
 
     await writeFile(plan.outputPath, COMPLETE_OUTPUT);
-    expect(await store.lanes.tick()).toEqual([]);
+    expect(await tickPlans(store)).toEqual([]);
     expect((await store.lanes.check("unit")).ready).toBe(true);
   });
 
@@ -930,10 +1018,10 @@ describe("managed provider lane outcomes and gates", () => {
       model: "gpt-5.6-sol",
       effort: "max",
     }));
-    const plans = await store.lanes.tick();
+    const plans = await tickPlans(store);
     for (const plan of plans) await finishComplete(plan);
     setNow(START + 5_000);
-    await store.lanes.tick();
+    await tickPlans(store);
     expect((await store.lanes.check("unit")).ready).toBe(true);
     expect((await store.lanes.check("codex-unit")).ready).toBe(true);
   });
@@ -983,11 +1071,11 @@ describe("managed receipt rejection", () => {
     for (const [label, mutate] of cases) {
       const { directory, store, prompt } = await fixture();
       await store.lanes.register(registration(prompt));
-      const [plan] = await store.lanes.tick();
+      const [plan] = await tickPlans(store);
       if (plan === undefined) throw new Error(`missing plan for ${label}`);
       await writeFile(plan.outputPath, "candidate output\n");
       await writeJson(plan.receiptPath, mutate(completeReceipt(plan)));
-      expect(await store.lanes.tick()).toEqual([]);
+      expect(await tickPlans(store)).toEqual([]);
       expect((await registry(directory)).lanes[0].attempts.at(-1).kind).toBe("claimed");
       expect((await store.lanes.check("unit")).blockingLaneIds).toEqual([
         "claude-review",
@@ -999,20 +1087,20 @@ describe("managed receipt rejection", () => {
     for (const output of [null, ""] as const) {
       const { directory, store, prompt } = await fixture();
       await store.lanes.register(registration(prompt));
-      const [plan] = await store.lanes.tick();
+      const [plan] = await tickPlans(store);
       if (plan === undefined) throw new Error("missing plan");
       if (output !== null) await writeFile(plan.outputPath, output);
       await writeJson(plan.receiptPath, completeReceipt(plan));
-      expect(await store.lanes.tick()).toEqual([]);
+      expect(await tickPlans(store)).toEqual([]);
       expect((await registry(directory)).lanes[0].attempts.at(-1).kind).toBe("claimed");
     }
 
     const { directory, store, prompt } = await fixture();
     await store.lanes.register(registration(prompt));
-    const [plan] = await store.lanes.tick();
+    const [plan] = await tickPlans(store);
     if (plan === undefined) throw new Error("missing plan");
     await writeFile(plan.receiptPath, "{");
-    expect(await store.lanes.tick()).toEqual([]);
+    expect(await tickPlans(store)).toEqual([]);
     expect((await registry(directory)).lanes[0].attempts.at(-1).kind).toBe("claimed");
   });
 
@@ -1020,25 +1108,25 @@ describe("managed receipt rejection", () => {
     for (const kind of ["pause", "failure"] as const) {
       const { directory, store, prompt } = await fixture();
       await store.lanes.register(registration(prompt));
-      const [plan] = await store.lanes.tick();
+      const [plan] = await tickPlans(store);
       if (plan === undefined) throw new Error("missing plan");
       const receipt = kind === "pause" ? pauseReceipt(plan) : failureReceipt(plan);
       const invalid = kind === "pause"
         ? { ...receipt, providerPause: { kind: "claude-session-limit" } }
         : { ...receipt, error: null };
       await writeJson(plan.receiptPath, invalid);
-      expect(await store.lanes.tick()).toEqual([]);
+      expect(await tickPlans(store)).toEqual([]);
       expect((await registry(directory)).lanes[0].attempts.at(-1).kind).toBe("claimed");
     }
 
     for (const receiptFor of [pauseReceipt, failureReceipt] as const) {
       const { directory, store, prompt } = await fixture();
       await store.lanes.register(registration(prompt));
-      const [plan] = await store.lanes.tick();
+      const [plan] = await tickPlans(store);
       if (plan === undefined) throw new Error("missing plan");
       await writeFile(plan.outputPath, "unexpected output reservation");
       await writeJson(plan.receiptPath, receiptFor(plan));
-      expect(await store.lanes.tick()).toEqual([]);
+      expect(await tickPlans(store)).toEqual([]);
       expect((await registry(directory)).lanes[0].attempts.at(-1).kind).toBe("claimed");
     }
   });
