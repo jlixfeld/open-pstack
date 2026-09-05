@@ -438,6 +438,12 @@ async function releaseOwnedLock(path: string, pid: string): Promise<void> {
   }
 }
 
+function guardIsContended(error: unknown): boolean {
+  return (
+    errorCode(error) === "SQLITE_BUSY" || errorCode(error) === "SQLITE_LOCKED"
+  );
+}
+
 async function acquireRecoveryLock(store: string): Promise<() => Promise<void>> {
   const guardPath = join(store, LOCK_RECOVERY_GUARD_FILE);
   const database = new Database(guardPath, { create: true, strict: true });
@@ -447,10 +453,7 @@ async function acquireRecoveryLock(store: string): Promise<() => Promise<void>> 
     database.exec("BEGIN IMMEDIATE");
   } catch (error) {
     database.close();
-    if (
-      errorCode(error) === "SQLITE_BUSY" ||
-      errorCode(error) === "SQLITE_LOCKED"
-    ) {
+    if (guardIsContended(error)) {
       throw new UserError("store lock recovery is held");
     }
     throw error;
@@ -470,6 +473,13 @@ async function acquireRecoveryLock(store: string): Promise<() => Promise<void>> 
   return async () => {
     try {
       database.exec("COMMIT");
+    } catch (error) {
+      // The guard transaction carries no data. On a fresh guard file COMMIT
+      // only persists SQLite's own header, which needs an exclusive lock
+      // that any concurrent guard opener's shared lock denies. Rolling back
+      // on close releases the guard just the same, so contention here must
+      // not fail a caller that already owns the store lock.
+      if (!guardIsContended(error)) throw error;
     } finally {
       database.close();
     }

@@ -11,6 +11,7 @@ import {
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Database } from "bun:sqlite";
 import { parseArgs as parseRunnerArgs } from "../runner/cli.ts";
 import {
   NotFoundError,
@@ -448,6 +449,39 @@ describe("Store", () => {
     ).toMatchObject({ id: "u1" });
     await recovered.close();
     expect(await readdir(directory)).not.toContain(".orch.lock");
+  });
+
+  it("keeps the new lock owner when a guard reader denies the release COMMIT", async () => {
+    const { directory, store } = await initializedStore();
+    await store.close();
+    const exited = Bun.spawn(["true"]);
+    await exited.exited;
+    await writeFile(join(directory, ".orch.lock"), `${exited.pid}\n`);
+    // The guard file is fresh, so the recovery COMMIT must write SQLite's
+    // header under an exclusive lock. This read transaction holds a shared
+    // lock for the whole recovery, which makes that COMMIT fail with
+    // SQLITE_BUSY every time rather than only when concurrent openers race.
+    const reader = new Database(join(directory, ".orch.lock.recovery.sqlite"), {
+      create: true,
+    });
+    const recovered = useStore(directory);
+    try {
+      reader.exec("BEGIN");
+      reader.query("SELECT count(*) FROM sqlite_master").get();
+      expect(
+        await recovered.units.add({ id: "u1", track: "build" })
+      ).toMatchObject({ id: "u1" });
+      expect(await readFile(join(directory, ".orch.lock"), "utf8")).toBe(
+        `${process.pid}\n`
+      );
+    } finally {
+      reader.close();
+    }
+    await recovered.close();
+    const entries = await readdir(directory);
+    expect(entries).not.toContain(".orch.lock");
+    expect(entries).toContain(".orch.lock.recovery.sqlite");
+    expect(entries).not.toContain(".orch.lock.recovery.sqlite-journal");
   });
 
   it("serializes simultaneous stale recovery-lock takeover into one durable lane claim", async () => {

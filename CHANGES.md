@@ -11,6 +11,9 @@ manual retry/release, receipt-v2 validation, output-byte digests, and no
 provider substitution. A root sentinel prevents reinitialization from erasing
 lane obligations when the provider-lanes subtree disappears. Dead recovery
 locks can be taken over without allowing routine commands to steal live locks.
+Releasing the data-free recovery guard treats a busy commit as release
+contention, so the command that just took over the lock neither fails nor
+leaves a dead `.orch.lock` behind.
 Ticks report held provider claims, first initialization recovers its own
 interrupted registry write, and identical registration repairs a missing prompt
 snapshot only from source bytes that match the stored digest. Receipt
