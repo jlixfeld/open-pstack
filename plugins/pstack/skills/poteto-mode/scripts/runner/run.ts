@@ -3,21 +3,33 @@ import {
   existsSync,
   mkdirSync,
   openSync,
-  readFileSync,
-  statSync,
   unlinkSync,
-  writeFileSync,
 } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { invocationCommand, preflightCommand, type CommandSpec } from "./commands.ts";
-import { parseProviderOutput, reportedModelMatches } from "./parse-output.ts";
+import { ManagedIdentityError, preparePrompt, sha256Hex } from "./identity.ts";
+import {
+  parseClaudePauseTelemetry,
+  parseClaudeSessionLimit,
+  parseProviderOutput,
+  reportedModelMatches,
+} from "./parse-output.ts";
+import {
+  buildReceipt,
+  finalizeReceipt,
+  finalizeReservation,
+  type CompleteModelProof,
+} from "./receipt.ts";
 import type {
+  FailureReceiptStatus,
   Provider,
   ReceiptStatus,
   RunnerOptions,
   RunnerReceipt,
+  VerifiedManagedAttempt,
 } from "./types.ts";
 import { UsageError } from "./types.ts";
+import { validateRunnerOptions } from "./validation.ts";
 
 const ERROR_EVIDENCE_LIMIT = 4_000;
 const GROK_PREFLIGHT_RETRY_DELAY_MS = 5_000;
@@ -47,6 +59,62 @@ export interface RunResult {
   readonly receipt: RunnerReceipt;
 }
 
+export interface RunStart {
+  readonly wallTimeMs: number;
+  readonly monotonicTimeMs: number;
+}
+
+interface RunTiming {
+  readonly startedAt: string;
+  readonly completedAt: string;
+  readonly elapsedMs: number;
+}
+
+interface RunClock {
+  readonly deadlineAt: number | null;
+  monotonicNow(): number;
+  timing(): RunTiming;
+}
+
+type RunStartInput = number | RunStart;
+type MonotonicClock = () => number;
+
+function normalizeRunStart(start: RunStartInput): RunStart {
+  if (typeof start !== "number") return start;
+  const wallNow = Date.now();
+  const monotonicNow = performance.now();
+  return {
+    wallTimeMs: start,
+    monotonicTimeMs: monotonicNow - Math.max(0, wallNow - start),
+  };
+}
+
+function createRunClock(
+  start: RunStartInput,
+  timeoutMs: number | null,
+  monotonicNow: MonotonicClock
+): RunClock {
+  const origin = normalizeRunStart(start);
+  const startedAt = new Date(origin.wallTimeMs).toISOString();
+  return {
+    deadlineAt: timeoutMs === null ? null : origin.monotonicTimeMs + timeoutMs,
+    monotonicNow,
+    timing() {
+      const elapsedMs = Math.max(
+        0,
+        Math.floor(monotonicNow() - origin.monotonicTimeMs)
+      );
+      return {
+        startedAt,
+        completedAt: new Date(
+          Math.max(Date.now(), origin.wallTimeMs + elapsedMs)
+        ).toISOString(),
+        elapsedMs,
+      };
+    },
+  };
+}
+
 function evidence(value: string): string {
   return value.trim().slice(0, ERROR_EVIDENCE_LIMIT);
 }
@@ -72,13 +140,6 @@ function reserveOutputs(options: RunnerOptions): void {
     removeIfExists(options.outputPath);
     throw error;
   }
-}
-
-function writeReceipt(path: string, receipt: RunnerReceipt): void {
-  writeFileSync(path, `${JSON.stringify(receipt, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
 }
 
 function installRunCancellation(): RunCancellation {
@@ -219,8 +280,8 @@ async function runProcess(
   spec: CommandSpec,
   cwd: string,
   env: NodeJS.ProcessEnv,
-  prompt: string,
-  deadlineAt: number | null,
+  prompt: string | Uint8Array,
+  clock: RunClock,
   cancellation: RunCancellation
 ): Promise<ProcessResult> {
   const child = Bun.spawn([executable, ...spec.args], {
@@ -242,11 +303,12 @@ async function runProcess(
     kind: "cancelled",
     signal,
   }));
+  const deadlineAt = clock.deadlineAt;
   const deadline: Promise<ProcessEvent> | null = deadlineAt === null
     ? null
     : new Promise((resolve) => {
       const arm = (): void => {
-        const remaining = deadlineAt - Date.now();
+        const remaining = deadlineAt - clock.monotonicNow();
         if (remaining <= 0) {
           resolve({ kind: "timed-out" });
           return;
@@ -283,7 +345,10 @@ async function runProcess(
       const drain = await Promise.race(drains);
       if (drain.kind === "drained") {
         captured = drain.captured;
-        if (deadlineAt !== null && Date.now() >= deadlineAt) {
+        if (
+          clock.deadlineAt !== null &&
+          clock.monotonicNow() >= clock.deadlineAt
+        ) {
           outcome = { kind: "timed-out" };
         }
       } else {
@@ -322,16 +387,18 @@ async function runProcess(
 }
 
 async function waitForGrokPreflightRetry(
-  deadlineAt: number | null,
+  clock: RunClock,
   cancellation: RunCancellation
 ): Promise<RetryWaitResult> {
   if (cancellation.signal !== null) return "cancelled";
 
-  const now = Date.now();
-  if (deadlineAt !== null && now >= deadlineAt) return "timed-out";
+  const now = clock.monotonicNow();
+  if (clock.deadlineAt !== null && now >= clock.deadlineAt) return "timed-out";
 
   const retryAt = now + GROK_PREFLIGHT_RETRY_DELAY_MS;
-  const wakeAt = deadlineAt === null ? retryAt : Math.min(retryAt, deadlineAt);
+  const wakeAt = clock.deadlineAt === null
+    ? retryAt
+    : Math.min(retryAt, clock.deadlineAt);
   const timerResult: RetryWaitResult = wakeAt < retryAt ? "timed-out" : "ready";
   let timer: ReturnType<typeof setTimeout> | null = null;
   try {
@@ -342,7 +409,12 @@ async function waitForGrokPreflightRetry(
       }),
     ]);
     if (cancellation.signal !== null) return "cancelled";
-    if (deadlineAt !== null && Date.now() >= deadlineAt) return "timed-out";
+    if (
+      clock.deadlineAt !== null &&
+      clock.monotonicNow() >= clock.deadlineAt
+    ) {
+      return "timed-out";
+    }
     return result;
   } finally {
     if (timer !== null) clearTimeout(timer);
@@ -452,6 +524,8 @@ function statusExitCode(status: ReceiptStatus): number {
   switch (status) {
     case "complete":
       return 0;
+    case "provider-paused":
+      return 75;
     case "cancelled":
       return 130;
     case "malformed-output":
@@ -472,13 +546,14 @@ function modelProof(
   provider: Provider,
   requested: string,
   reported: string | null
-): {
-  readonly reportedModel: string | null;
-  readonly modelVerified: boolean;
-  readonly modelEvidence: "provider-report" | "pinned-argv" | null;
-} {
-  if (reportedModelMatches(requested, reported)) {
+): CompleteModelProof | null {
+  if (
+    provider !== "codex" &&
+    reported !== null &&
+    reportedModelMatches(requested, reported)
+  ) {
     return {
+      provider,
       reportedModel: reported,
       modelVerified: true,
       modelEvidence: "provider-report",
@@ -486,61 +561,13 @@ function modelProof(
   }
   if (provider === "codex" && reported === null) {
     return {
+      provider,
       reportedModel: null,
       modelVerified: false,
       modelEvidence: "pinned-argv",
     };
   }
-  return {
-    reportedModel: reported,
-    modelVerified: false,
-    modelEvidence: null,
-  };
-}
-
-function completeReceipt(
-  options: RunnerOptions,
-  partial: Omit<RunnerReceipt, "schemaVersion" | "parent" | "provider" | "model" | "effort" | "mode" | "cwd" | "promptPath" | "outputPath">
-): RunnerReceipt {
-  return {
-    schemaVersion: 1,
-    parent: options.parent,
-    provider: options.provider,
-    model: options.model,
-    effort: options.effort,
-    mode: options.mode,
-    cwd: options.cwd,
-    promptPath: options.promptPath,
-    outputPath: options.outputPath,
-    ...partial,
-  };
-}
-
-export function validateOptions(options: RunnerOptions): void {
-  if (options.parent === options.provider) {
-    throw new UsageError(
-      `provider ${options.provider} is native to parent ${options.parent}; use the parent subagent primitive`
-    );
-  }
-  if (options.model.trim().length === 0) throw new UsageError("model must not be empty");
-  if (
-    options.timeoutMs !== null &&
-    (!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0)
-  ) {
-    throw new UsageError("timeout must be greater than zero");
-  }
-  if (!existsSync(options.promptPath) || !statSync(options.promptPath).isFile()) {
-    throw new UsageError(`prompt is not a file: ${options.promptPath}`);
-  }
-  if (!existsSync(options.cwd) || !statSync(options.cwd).isDirectory()) {
-    throw new UsageError(`cwd is not a directory: ${options.cwd}`);
-  }
-  if (
-    options.promptPath === options.outputPath ||
-    options.promptPath === options.receiptPath
-  ) {
-    throw new UsageError("prompt, output, and receipt paths must be distinct");
-  }
+  return null;
 }
 
 interface LaneProgress {
@@ -552,19 +579,19 @@ interface LaneProgress {
 async function executeLane(
   options: RunnerOptions,
   cancellation: RunCancellation,
-  started: number,
-  deadlineAt: number | null,
+  clock: RunClock,
   invocation: CommandSpec,
   preflight: CommandSpec,
-  progress: LaneProgress
+  progress: LaneProgress,
+  prompt: Uint8Array,
+  managedAttempt: VerifiedManagedAttempt | null
 ): Promise<RunResult> {
-  const startedAt = new Date(started).toISOString();
-  const prompt = readFileSync(options.promptPath, "utf8");
   const env = childEnvironment(options.provider);
-  const executable = Bun.which(invocation.command, {
+  const foundExecutable = Bun.which(invocation.command, {
     PATH: env.PATH,
     cwd: options.cwd,
   });
+  const executable = foundExecutable === null ? null : resolve(foundExecutable);
   progress.executable = executable;
   progress.argv = [executable ?? invocation.command, ...invocation.args];
 
@@ -575,27 +602,21 @@ async function executeLane(
     status: "cancelled" | "timed-out",
     phase: string
   ): RunResult => {
-    const completed = Date.now();
+    const timing = clock.timing();
     const receivedSignal = status === "cancelled" ? cancellation.signal : null;
     const terminalPreflight = preflightState.status === "not-run"
       ? { ...preflightState, status }
       : preflightState;
-    receipt = completeReceipt(options, {
+    receipt = buildReceipt(options, {
       status,
-      startedAt,
-      completedAt: new Date(completed).toISOString(),
-      elapsedMs: completed - started,
+      provider: options.provider,
+      managedAttempt,
+      ...timing,
       executable,
       preflight: terminalPreflight,
       argv: [executable ?? invocation.command, ...invocation.args],
       exitCode: null,
       signal: null,
-      reportedModel: null,
-      modelVerified: false,
-      modelEvidence: null,
-      sessionId: null,
-      usage: null,
-      costUsd: null,
       error: {
         message: receivedSignal === null
           ? `explicit deadline elapsed ${phase}`
@@ -604,42 +625,39 @@ async function executeLane(
       },
     });
     removeIfExists(options.outputPath);
-    writeReceipt(options.receiptPath, receipt);
+    finalizeReceipt(options.receiptPath, receipt);
     return { exitCode: statusExitCode(status), receipt };
   };
 
   if (cancellation.signal !== null) {
     return finishWithoutChild("cancelled", "before authentication preflight");
   }
-  if (deadlineAt !== null && Date.now() >= deadlineAt) {
+  if (
+    clock.deadlineAt !== null &&
+    clock.monotonicNow() >= clock.deadlineAt
+  ) {
     return finishWithoutChild("timed-out", "before authentication preflight");
   }
 
   if (executable === null) {
-    const completed = Date.now();
-    receipt = completeReceipt(options, {
+    const timing = clock.timing();
+    receipt = buildReceipt(options, {
       status: "unavailable-cli",
-      startedAt,
-      completedAt: new Date(completed).toISOString(),
-      elapsedMs: completed - started,
+      provider: options.provider,
+      managedAttempt,
+      ...timing,
       executable: null,
       preflight: preflightState,
       argv: [invocation.command, ...invocation.args],
       exitCode: null,
       signal: null,
-      reportedModel: null,
-      modelVerified: false,
-      modelEvidence: null,
-      sessionId: null,
-      usage: null,
-      costUsd: null,
       error: {
         message: `${invocation.command} executable not found`,
         evidence: "",
       },
     });
     removeIfExists(options.outputPath);
-    writeReceipt(options.receiptPath, receipt);
+    finalizeReceipt(options.receiptPath, receipt);
     return { exitCode: statusExitCode(receipt.status), receipt };
   }
 
@@ -650,7 +668,7 @@ async function executeLane(
     options.cwd,
     env,
     "",
-    deadlineAt,
+    clock,
     cancellation
   );
   let rawPreflightEvidence = evidence(`${preflightResult.stdout}\n${preflightResult.stderr}`);
@@ -677,7 +695,7 @@ async function executeLane(
     };
     progress.preflight = preflightState;
 
-    const retryWait = await waitForGrokPreflightRetry(deadlineAt, cancellation);
+    const retryWait = await waitForGrokPreflightRetry(clock, cancellation);
     if (retryWait !== "ready") {
       preflightState = {
         ...preflightState,
@@ -697,7 +715,7 @@ async function executeLane(
       options.cwd,
       env,
       "",
-      deadlineAt,
+      clock,
       cancellation
     );
     rawPreflightEvidence = evidence(`${preflightResult.stdout}\n${preflightResult.stderr}`);
@@ -730,31 +748,25 @@ async function executeLane(
   progress.preflight = preflightState;
 
   if (preflightState.status !== "passed") {
-    const completed = Date.now();
+    const timing = clock.timing();
     const preflightFailure = preflightAssessment.kind === "failed"
       ? preflightAssessment.receiptStatus
       : "child-failed";
-    const status: ReceiptStatus = preflightResult.cancelledBy !== null
+    const status: FailureReceiptStatus = preflightResult.cancelledBy !== null
       ? "cancelled"
       : preflightResult.timedOut
         ? "timed-out"
         : preflightFailure;
-    receipt = completeReceipt(options, {
+    receipt = buildReceipt(options, {
       status,
-      startedAt,
-      completedAt: new Date(completed).toISOString(),
-      elapsedMs: completed - started,
+      provider: options.provider,
+      managedAttempt,
+      ...timing,
       executable,
       preflight: preflightState,
       argv: [executable, ...invocation.args],
       exitCode: preflightResult.exitCode,
       signal: preflightResult.signal,
-      reportedModel: null,
-      modelVerified: false,
-      modelEvidence: null,
-      sessionId: null,
-      usage: null,
-      costUsd: null,
       error: {
         message: preflightResult.cancelledBy !== null
           ? `launcher received ${preflightResult.cancelledBy} during preflight`
@@ -765,14 +777,17 @@ async function executeLane(
       },
     });
     removeIfExists(options.outputPath);
-    writeReceipt(options.receiptPath, receipt);
+    finalizeReceipt(options.receiptPath, receipt);
     return { exitCode: statusExitCode(status), receipt };
   }
 
   if (cancellation.signal !== null) {
     return finishWithoutChild("cancelled", "before model execution");
   }
-  if (deadlineAt !== null && Date.now() >= deadlineAt) {
+  if (
+    clock.deadlineAt !== null &&
+    clock.monotonicNow() >= clock.deadlineAt
+  ) {
     return finishWithoutChild("timed-out", "before model execution");
   }
 
@@ -782,14 +797,11 @@ async function executeLane(
     options.cwd,
     env,
     prompt,
-    deadlineAt,
+    clock,
     cancellation
   );
-  const completed = Date.now();
   const base = {
-    startedAt,
-    completedAt: new Date(completed).toISOString(),
-    elapsedMs: completed - started,
+    ...clock.timing(),
     executable,
     preflight: preflightState,
     argv: [executable, ...invocation.args],
@@ -797,23 +809,44 @@ async function executeLane(
     signal: result.signal,
   } as const;
 
+  if (
+    options.provider === "claude" &&
+    result.cancelledBy === null &&
+    !result.timedOut
+  ) {
+    const pause = parseClaudeSessionLimit(result.stdout, base.completedAt);
+    if (pause !== null) {
+      const telemetry = parseClaudePauseTelemetry(result.stdout, options.model);
+      receipt = buildReceipt(options, {
+        ...base,
+        status: "provider-paused",
+        provider: options.provider,
+        managedAttempt,
+        reportedModel: telemetry?.reportedModel ?? null,
+        sessionId: telemetry?.sessionId ?? null,
+        usage: telemetry?.usage ?? null,
+        costUsd: telemetry?.costUsd ?? null,
+        providerPause: pause,
+      });
+      removeIfExists(options.outputPath);
+      finalizeReceipt(options.receiptPath, receipt);
+      return { exitCode: statusExitCode(receipt.status), receipt };
+    }
+  }
+
   if (result.cancelledBy !== null || result.timedOut || result.exitCode !== 0) {
     const rawFailureEvidence = `${result.stderr}\n${result.stdout}`;
     const failureEvidence = evidence(rawFailureEvidence);
-    const status: ReceiptStatus = result.cancelledBy !== null
+    const status: FailureReceiptStatus = result.cancelledBy !== null
       ? "cancelled"
       : result.timedOut
         ? "timed-out"
         : unavailableStatus(rawFailureEvidence);
-    receipt = completeReceipt(options, {
+    receipt = buildReceipt(options, {
       ...base,
       status,
-      reportedModel: null,
-      modelVerified: false,
-      modelEvidence: null,
-      sessionId: null,
-      usage: null,
-      costUsd: null,
+      provider: options.provider,
+      managedAttempt,
       error: {
         message: result.cancelledBy !== null
           ? result.signal === result.cancelledBy
@@ -826,7 +859,7 @@ async function executeLane(
       },
     });
     removeIfExists(options.outputPath);
-    writeReceipt(options.receiptPath, receipt);
+    finalizeReceipt(options.receiptPath, receipt);
     return { exitCode: statusExitCode(status), receipt };
   }
 
@@ -842,50 +875,53 @@ async function executeLane(
       options.model,
       parsed.reportedModel
     );
-    if (!proof.modelVerified && proof.modelEvidence !== "pinned-argv") {
+    if (proof === null) {
       throw new Error(
         `requested model ${options.model} was not reported by ${options.provider}`
       );
     }
-    writeFileSync(options.outputPath, parsed.text, { encoding: "utf8", mode: 0o600 });
-    receipt = completeReceipt(options, {
+    const output = new TextEncoder().encode(parsed.text);
+    finalizeReservation(options.outputPath, output);
+    receipt = buildReceipt(options, {
       ...base,
       status: "complete",
-      ...proof,
+      modelProof: proof,
+      managedAttempt,
+      outputSha256: sha256Hex(output),
       sessionId: parsed.sessionId,
       usage: parsed.usage,
       costUsd: parsed.costUsd,
-      error: null,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     removeIfExists(options.outputPath);
-    receipt = completeReceipt(options, {
+    receipt = buildReceipt(options, {
       ...base,
       status: "malformed-output",
-      reportedModel: null,
-      modelVerified: false,
-      modelEvidence: null,
-      sessionId: null,
-      usage: null,
-      costUsd: null,
+      provider: options.provider,
+      managedAttempt,
       error: {
-        message,
+        message: evidence(message) || "provider output could not be parsed",
         evidence: evidence(`${result.stderr}\n${result.stdout}`),
       },
     });
   }
 
-  writeReceipt(options.receiptPath, receipt);
+  finalizeReceipt(options.receiptPath, receipt);
   return { exitCode: statusExitCode(receipt.status), receipt };
 }
 
 export async function runLane(
-  options: RunnerOptions,
-  started: number = Date.now()
+  input: RunnerOptions,
+  started: RunStartInput = {
+    wallTimeMs: Date.now(),
+    monotonicTimeMs: performance.now(),
+  },
+  monotonicNow: MonotonicClock = () => performance.now()
 ): Promise<RunResult> {
-  validateOptions(options);
-  const deadlineAt = options.timeoutMs === null ? null : started + options.timeoutMs;
+  const options = resolvedOptions(input);
+  validateRunnerOptions(options);
+  const clock = createRunClock(started, options.timeoutMs, monotonicNow);
   const invocation = invocationCommand(options);
   const preflight = preflightCommand(options.provider);
   const progress: LaneProgress = {
@@ -898,46 +934,46 @@ export async function runLane(
     argv: [invocation.command, ...invocation.args],
   };
   const cancellation = installRunCancellation();
+  let verifiedManagedAttempt: VerifiedManagedAttempt | null = null;
   try {
     reserveOutputs(options);
     try {
+      const prepared = preparePrompt(options);
+      verifiedManagedAttempt = prepared.managedAttempt;
       return await executeLane(
         options,
         cancellation,
-        started,
-        deadlineAt,
+        clock,
         invocation,
         preflight,
-        progress
+        progress,
+        prepared.prompt,
+        prepared.managedAttempt
       );
     } catch (error) {
-      const completed = Date.now();
+      const timing = clock.timing();
       const signal = cancellation.signal;
-      const status: ReceiptStatus = signal !== null
+      const status: FailureReceiptStatus = signal !== null
         ? "cancelled"
-        : deadlineAt !== null && completed >= deadlineAt
+        : clock.deadlineAt !== null && clock.monotonicNow() >= clock.deadlineAt
           ? "timed-out"
           : "child-failed";
       const message = error instanceof Error ? error.message : String(error);
       const terminalPreflight = progress.preflight.status === "not-run" && status !== "child-failed"
         ? { ...progress.preflight, status }
         : progress.preflight;
-      const receipt = completeReceipt(options, {
+      const receipt = buildReceipt(options, {
         status,
-        startedAt: new Date(started).toISOString(),
-        completedAt: new Date(completed).toISOString(),
-        elapsedMs: completed - started,
+        provider: options.provider,
+        ...timing,
         executable: progress.executable,
         preflight: terminalPreflight,
         argv: progress.argv,
         exitCode: null,
         signal: null,
-        reportedModel: null,
-        modelVerified: false,
-        modelEvidence: null,
-        sessionId: null,
-        usage: null,
-        costUsd: null,
+        managedAttempt: error instanceof ManagedIdentityError
+          ? error.attempt
+          : verifiedManagedAttempt,
         error: {
           message: status === "cancelled"
             ? `launcher received ${signal} after reserving output paths`
@@ -948,7 +984,7 @@ export async function runLane(
         },
       });
       removeIfExists(options.outputPath);
-      writeReceipt(options.receiptPath, receipt);
+      finalizeReceipt(options.receiptPath, receipt);
       return { exitCode: statusExitCode(status), receipt };
     }
   } finally {

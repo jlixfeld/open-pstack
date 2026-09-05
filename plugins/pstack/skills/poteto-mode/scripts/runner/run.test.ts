@@ -6,21 +6,26 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { invocationCommand, preflightCommand } from "./commands.ts";
+import { laneFingerprint, sha256Hex } from "./identity.ts";
+import { parseRunnerReceipt } from "./receipt.ts";
 import { childEnvironment, runLane } from "./run.ts";
 import { main } from "./cli.ts";
-import type { Provider, RunnerOptions, RunnerReceipt } from "./types.ts";
+import type { Provider, RunnerOptions, RunnerReceiptV2 } from "./types.ts";
 
 let scratch = "";
 let bin = "";
 let previousPath: string | undefined;
 
 const fake = `#!/usr/bin/env bun
+import { Buffer } from "node:buffer";
 import { appendFileSync, existsSync, unlinkSync, writeFileSync } from "node:fs";
 const args = process.argv.slice(2);
 const name = process.argv[1].split("/").at(-1);
@@ -109,6 +114,22 @@ if (name === "grok" && args[0] === "models") {
 }
 const modelIndex = args.findIndex((value) => value === "--model");
 const model = modelIndex >= 0 ? args[modelIndex + 1] : "unknown";
+const malformedUsage = {
+  input_tokens: -1,
+  cached_input_tokens: 1.5,
+  cache_creation_input_tokens: Number.MAX_SAFE_INTEGER + 1,
+  output_tokens: -2,
+  reasoning_output_tokens: 3.5,
+  total_tokens: Number.POSITIVE_INFINITY,
+};
+if (stage === "model" && process.env.FAKE_INVOCATION_LOG_PATH) {
+  const promptBytes = name === "grok"
+    ? new Uint8Array()
+    : new Uint8Array(await new Response(Bun.stdin.stream()).arrayBuffer());
+  const prompt = new TextDecoder().decode(promptBytes);
+  const promptBase64 = Buffer.from(promptBytes).toString("base64");
+  writeFileSync(process.env.FAKE_INVOCATION_LOG_PATH, JSON.stringify({args, cwd: process.cwd(), prompt, promptBase64}));
+}
 if (process.env.FAKE_INVALID_MODEL === "1") {
   console.error("The requested model is not supported with this account.");
   process.exit(1);
@@ -130,11 +151,36 @@ if (stage === "model" && process.env.FAKE_SELF_SIGNAL) {
   await Bun.sleep(5_000);
 }
 if (name === "claude") {
-  console.log(JSON.stringify({result:"CLAUDE_OK",session_id:"c1",usage:{input_tokens:10,output_tokens:2},total_cost_usd:0.01,modelUsage:{[model]:{}}}));
+  if (process.env.FAKE_CLAUDE_PAUSE_EXIT !== undefined) {
+    console.log(JSON.stringify({
+      duration_api_ms: 65277,
+      session_id: "098e45a4-671d-4f4e-aaaa-51abd7fbc8a3",
+      total_cost_usd: 1.0764304999999998,
+      usage: {input_tokens:10,cache_creation_input_tokens:80240,cache_read_input_tokens:298407,output_tokens:4932},
+      modelUsage: {[model]: {inputTokens: 10}},
+      terminal_reason: process.env.FAKE_CLAUDE_PAUSE_REASON ?? "api_error",
+      is_error: process.env.FAKE_CLAUDE_PAUSE_ERROR === "false" ? false : true,
+      api_error_status: process.env.FAKE_CLAUDE_PAUSE_STATUS === "string" ? "429" : Number(process.env.FAKE_CLAUDE_PAUSE_STATUS ?? "429"),
+      result: process.env.FAKE_CLAUDE_PAUSE_RESULT ?? "You've hit your session limit · resets 2:10pm (America/Toronto)",
+      type: "result",
+    }));
+    if (process.env.FAKE_CLAUDE_PAUSE_WRITTEN_PATH) {
+      writeFileSync(process.env.FAKE_CLAUDE_PAUSE_WRITTEN_PATH, String(process.pid));
+    }
+    if (process.env.FAKE_CLAUDE_PAUSE_WAIT_FOR_SIGNAL === "1") {
+      await Bun.sleep(5_000);
+    }
+    process.exit(Number(process.env.FAKE_CLAUDE_PAUSE_EXIT));
+  }
+  console.log(JSON.stringify({result:"CLAUDE_OK",session_id:"c1",usage:process.env.FAKE_MALFORMED_TELEMETRY === "1" ? malformedUsage : {input_tokens:10,output_tokens:2},total_cost_usd:process.env.FAKE_MALFORMED_TELEMETRY === "1" ? -0.01 : 0.01,modelUsage:{[model]:{}}}));
 } else if (name === "codex") {
   console.log(JSON.stringify({type:"thread.started",thread_id:"o1"}));
+  if (process.env.FAKE_CODEX_FAILURE_LENGTH) {
+    console.log(JSON.stringify({type:"turn.failed",error:{message:"x".repeat(Number(process.env.FAKE_CODEX_FAILURE_LENGTH))}}));
+    process.exit(0);
+  }
   console.log(JSON.stringify({type:"item.completed",item:{type:"agent_message",text:"CODEX_OK"}}));
-  console.log(JSON.stringify({type:"turn.completed",usage:{input_tokens:20,cached_input_tokens:5,output_tokens:3,reasoning_output_tokens:1}}));
+  console.log(JSON.stringify({type:"turn.completed",usage:process.env.FAKE_MALFORMED_TELEMETRY === "1" ? malformedUsage : {input_tokens:20,cached_input_tokens:5,output_tokens:3,reasoning_output_tokens:1}}));
 } else {
   console.log(JSON.stringify({type:"assistant",message:{content:[{type:"text",text:"progress"}]}}));
   console.log(JSON.stringify({type:"result",subtype:"success",is_error:false,result:"GROK_OK",session_id:"g1",usage:{input_tokens:30,output_tokens:4,total_tokens:34},total_cost_usd:0.02,modelUsage:{[model + "-build"]:{}}}));
@@ -169,11 +215,69 @@ function options(provider: Provider, suffix: string = provider): RunnerOptions {
     outputPath: join(scratch, `${suffix}.out`),
     receiptPath: join(scratch, `${suffix}.receipt.json`),
     timeoutMs: null,
+    managedAttempt: null,
   };
 }
 
-function receipt(path: string): RunnerReceipt {
-  return JSON.parse(readFileSync(path, "utf8")) as RunnerReceipt;
+function receipt(path: string): RunnerReceiptV2 {
+  const parsed = parseRunnerReceipt(JSON.parse(readFileSync(path, "utf8")));
+  if (parsed === null) throw new Error(`runner wrote an invalid receipt: ${path}`);
+  return parsed;
+}
+
+function managedOptions(
+  suffix: string = "managed-pause",
+  timeoutMs: number | null = null
+): RunnerOptions {
+  const input = { ...options("claude", suffix), timeoutMs };
+  const promptSha256 = sha256Hex(readFileSync(input.promptPath));
+  return {
+    ...input,
+    managedAttempt: {
+      laneId: "manifest-review-claude",
+      attemptId: "manifest-review-claude-000001",
+      laneFingerprint: laneFingerprint(input, promptSha256),
+      promptSha256,
+    },
+  };
+}
+
+function withManagedAttempt(input: RunnerOptions): RunnerOptions {
+  const promptSha256 = sha256Hex(readFileSync(input.promptPath));
+  return {
+    ...input,
+    managedAttempt: {
+      laneId: `managed-${input.provider}`,
+      attemptId: `managed-${input.provider}-000001`,
+      laneFingerprint: laneFingerprint(input, promptSha256),
+      promptSha256,
+    },
+  };
+}
+
+function expectManagedInvocation(input: RunnerOptions, invocationLog: string): void {
+  if (input.managedAttempt === null) {
+    throw new Error("managed test setup lost its claim");
+  }
+  const executable = join(bin, input.provider);
+  const invocation = invocationCommand(input);
+  const preflight = preflightCommand(input.provider);
+  expect(JSON.parse(readFileSync(invocationLog, "utf8"))).toEqual({
+    args: [...invocation.args],
+    cwd: realpathSync(input.cwd),
+    prompt: readFileSync(input.promptPath, "utf8"),
+    promptBase64: readFileSync(input.promptPath).toString("base64"),
+  });
+  const recorded = receipt(input.receiptPath);
+  if (recorded.schemaVersion !== 2) {
+    throw new Error("managed invocation wrote a legacy receipt");
+  }
+  expect(recorded.argv).toEqual([executable, ...invocation.args]);
+  expect(recorded.preflight.argv).toEqual([executable, ...preflight.args]);
+  expect(recorded.managedAttempt).toEqual({
+    ...input.managedAttempt,
+    verified: true,
+  });
 }
 
 function runnerArgs(input: RunnerOptions): string[] {
@@ -191,6 +295,14 @@ function runnerArgs(input: RunnerOptions): string[] {
   ];
   if (input.timeoutMs !== null) {
     args.push("--timeout", String(input.timeoutMs / 1_000));
+  }
+  if (input.managedAttempt !== null) {
+    args.push(
+      "--lane-id", input.managedAttempt.laneId,
+      "--attempt-id", input.managedAttempt.attemptId,
+      "--lane-fingerprint", input.managedAttempt.laneFingerprint,
+      "--prompt-sha256", input.managedAttempt.promptSha256
+    );
   }
   return args;
 }
@@ -260,6 +372,16 @@ beforeEach(() => {
   delete process.env.FAKE_DESCENDANT_HOLDS_PIPES_MS;
   delete process.env.FAKE_DESCENDANT_PID_PATH;
   delete process.env.FAKE_SELF_SIGNAL;
+  delete process.env.FAKE_CLAUDE_PAUSE_EXIT;
+  delete process.env.FAKE_CLAUDE_PAUSE_REASON;
+  delete process.env.FAKE_CLAUDE_PAUSE_ERROR;
+  delete process.env.FAKE_CLAUDE_PAUSE_STATUS;
+  delete process.env.FAKE_CLAUDE_PAUSE_RESULT;
+  delete process.env.FAKE_INVOCATION_LOG_PATH;
+  delete process.env.FAKE_CLAUDE_PAUSE_WAIT_FOR_SIGNAL;
+  delete process.env.FAKE_CLAUDE_PAUSE_WRITTEN_PATH;
+  delete process.env.FAKE_CODEX_FAILURE_LENGTH;
+  delete process.env.FAKE_MALFORMED_TELEMETRY;
 });
 
 afterEach(() => {
@@ -285,10 +407,362 @@ afterEach(() => {
   delete process.env.FAKE_DESCENDANT_HOLDS_PIPES_MS;
   delete process.env.FAKE_DESCENDANT_PID_PATH;
   delete process.env.FAKE_SELF_SIGNAL;
+  delete process.env.FAKE_CLAUDE_PAUSE_EXIT;
+  delete process.env.FAKE_CLAUDE_PAUSE_REASON;
+  delete process.env.FAKE_CLAUDE_PAUSE_ERROR;
+  delete process.env.FAKE_CLAUDE_PAUSE_STATUS;
+  delete process.env.FAKE_CLAUDE_PAUSE_RESULT;
+  delete process.env.FAKE_INVOCATION_LOG_PATH;
+  delete process.env.FAKE_CLAUDE_PAUSE_WAIT_FOR_SIGNAL;
+  delete process.env.FAKE_CLAUDE_PAUSE_WRITTEN_PATH;
+  delete process.env.FAKE_CODEX_FAILURE_LENGTH;
+  delete process.env.FAKE_MALFORMED_TELEMETRY;
   rmSync(scratch, { recursive: true, force: true });
 });
 
 describe("runLane", () => {
+  it("classifies the structured Claude session limit for an unmanaged lane", async () => {
+    process.env.FAKE_CLAUDE_PAUSE_EXIT = "1";
+    const input = options("claude", "unmanaged-pause");
+
+    const result = await runLane(input);
+
+    expect(result.exitCode).toBe(75);
+    expect(receipt(input.receiptPath)).toMatchObject({
+      schemaVersion: 2,
+      status: "provider-paused",
+      managedAttempt: null,
+      providerPause: { kind: "claude-session-limit" },
+    });
+  });
+
+  for (const exit of [1, 0]) {
+    it(`records Claude's structured session limit when the child exits ${exit}`, async () => {
+      process.env.FAKE_CLAUDE_PAUSE_EXIT = String(exit);
+      const input = managedOptions(`managed-pause-${exit}`);
+      const invocationLog = join(scratch, `managed-pause-${exit}.invocation.json`);
+      process.env.FAKE_INVOCATION_LOG_PATH = invocationLog;
+
+      const result = await runLane(input);
+
+      expect(result.exitCode).toBe(75);
+      expectManagedInvocation(input, invocationLog);
+      expect(existsSync(input.outputPath)).toBe(false);
+      expect(receipt(input.receiptPath)).toMatchObject({
+        schemaVersion: 2,
+        status: "provider-paused",
+        managedAttempt: {
+          ...input.managedAttempt,
+          verified: true,
+        },
+        providerPause: {
+          kind: "claude-session-limit",
+          terminalReason: "api_error",
+          apiStatus: 429,
+          message: "You've hit your session limit · resets 2:10pm (America/Toronto)",
+          resetEvidence: "You've hit your session limit · resets 2:10pm (America/Toronto)",
+        },
+        sessionId: "098e45a4-671d-4f4e-aaaa-51abd7fbc8a3",
+        usage: { inputTokens: 10, outputTokens: 4932 },
+        costUsd: 1.0764304999999998,
+        error: null,
+      });
+    });
+  }
+
+  it("does not treat malformed Claude 429 lookalikes as provider pauses", async () => {
+    const cases: Array<readonly [string, Record<string, string>]> = [
+      ["string status", { FAKE_CLAUDE_PAUSE_STATUS: "string" }],
+      ["wrong terminal reason", { FAKE_CLAUDE_PAUSE_REASON: "rate_limit" }],
+      ["unrelated result", { FAKE_CLAUDE_PAUSE_RESULT: "HTTP 429" }],
+      ["wrong result prefix", { FAKE_CLAUDE_PAUSE_RESULT: "You've hit your usage limit" }],
+    ];
+    for (const [label, overrides] of cases) {
+      process.env.FAKE_CLAUDE_PAUSE_EXIT = "1";
+      Object.assign(process.env, overrides);
+      const input = options("claude", `not-paused-${label}`);
+      const result = await runLane(input);
+      expect(result.exitCode).not.toBe(75);
+      expect(receipt(input.receiptPath).status).not.toBe("provider-paused");
+      delete process.env.FAKE_CLAUDE_PAUSE_STATUS;
+      delete process.env.FAKE_CLAUDE_PAUSE_REASON;
+      delete process.env.FAKE_CLAUDE_PAUSE_RESULT;
+    }
+  });
+
+  it("fails managed identity validation before Claude preflight", async () => {
+    const input = managedOptions("managed-bad-digest");
+    if (input.managedAttempt === null) throw new Error("managed test setup lost its claim");
+    const preflightStarted = join(scratch, "managed-bad-digest.preflight");
+    const modelStarted = join(scratch, "managed-bad-digest.model");
+    const invocationLog = join(scratch, "managed-bad-digest.invocation.json");
+    process.env.FAKE_PREFLIGHT_STARTED_PATH = preflightStarted;
+    process.env.FAKE_MODEL_STARTED_PATH = modelStarted;
+    process.env.FAKE_INVOCATION_LOG_PATH = invocationLog;
+    const invalid: RunnerOptions = {
+      ...input,
+      managedAttempt: {
+        ...input.managedAttempt,
+        promptSha256: "0".repeat(64),
+      },
+    };
+
+    const result = await runLane(invalid);
+
+    expect(result.exitCode).toBe(70);
+    expect(existsSync(preflightStarted)).toBe(false);
+    expect(existsSync(modelStarted)).toBe(false);
+    expect(existsSync(invocationLog)).toBe(false);
+    expect(existsSync(invalid.outputPath)).toBe(false);
+    expect(receipt(invalid.receiptPath)).toMatchObject({
+      schemaVersion: 2,
+      status: "child-failed",
+      managedAttempt: {
+        ...invalid.managedAttempt,
+        verified: false,
+        reason: "prompt-digest-mismatch",
+      },
+      providerPause: null,
+    });
+  });
+
+  it("rejects every stale managed lane input with the correct prompt digest before preflight", async () => {
+    const mutations: Array<readonly [
+      string,
+      (input: RunnerOptions) => RunnerOptions,
+    ]> = [
+      ["model", (input) => ({ ...input, model: "claude-opus-5" })],
+      ["effort", (input) => ({ ...input, effort: "xhigh" })],
+      ["mode", (input) => ({ ...input, mode: "isolated-write" })],
+      ["cwd", (input) => {
+        const cwd = join(scratch, "stale-cwd-alternate");
+        mkdirSync(cwd, { recursive: true });
+        return { ...input, cwd };
+      }],
+      ["timeout", (input) => ({ ...input, timeoutMs: 1_000 })],
+    ];
+
+    for (const [field, mutate] of mutations) {
+      const input = mutate(managedOptions(`managed-stale-${field}`));
+      if (input.managedAttempt === null) {
+        throw new Error("managed test setup lost its claim");
+      }
+      const preflightStarted = join(scratch, `managed-stale-${field}.preflight`);
+      const modelStarted = join(scratch, `managed-stale-${field}.model`);
+      const invocationLog = join(scratch, `managed-stale-${field}.invocation.json`);
+      process.env.FAKE_PREFLIGHT_STARTED_PATH = preflightStarted;
+      process.env.FAKE_MODEL_STARTED_PATH = modelStarted;
+      process.env.FAKE_INVOCATION_LOG_PATH = invocationLog;
+
+      const result = await runLane(input);
+
+      expect(input.managedAttempt.promptSha256).toBe(
+        sha256Hex(readFileSync(input.promptPath, "utf8"))
+      );
+      expect(result.exitCode).toBe(70);
+      expect(existsSync(preflightStarted)).toBe(false);
+      expect(existsSync(modelStarted)).toBe(false);
+      expect(existsSync(invocationLog)).toBe(false);
+      expect(receipt(input.receiptPath)).toMatchObject({
+        status: "child-failed",
+        managedAttempt: {
+          ...input.managedAttempt,
+          verified: false,
+          reason: "lane-fingerprint-mismatch",
+        },
+        providerPause: null,
+      });
+    }
+  });
+
+  it("receipts an unreadable managed prompt without running preflight", async () => {
+    const input = managedOptions("managed-unreadable-prompt");
+    if (input.managedAttempt === null) throw new Error("managed test setup lost its claim");
+    const preflightStarted = join(scratch, "managed-unreadable-prompt.preflight");
+    const modelStarted = join(scratch, "managed-unreadable-prompt.model");
+    const invocationLog = join(scratch, "managed-unreadable-prompt.invocation.json");
+    process.env.FAKE_PREFLIGHT_STARTED_PATH = preflightStarted;
+    process.env.FAKE_MODEL_STARTED_PATH = modelStarted;
+    process.env.FAKE_INVOCATION_LOG_PATH = invocationLog;
+    chmodSync(input.promptPath, 0o000);
+    try {
+      const result = await runLane(input);
+
+      expect(result.exitCode).toBe(70);
+      expect(existsSync(preflightStarted)).toBe(false);
+      expect(existsSync(modelStarted)).toBe(false);
+      expect(existsSync(invocationLog)).toBe(false);
+      expect(existsSync(input.outputPath)).toBe(false);
+      expect(receipt(input.receiptPath)).toMatchObject({
+        status: "child-failed",
+        managedAttempt: {
+          ...input.managedAttempt,
+          verified: false,
+          reason: "prompt-unreadable",
+        },
+        providerPause: null,
+      });
+    } finally {
+      chmodSync(input.promptPath, 0o600);
+    }
+  });
+
+  it("rejects managed Grok before reserving artifacts or starting a provider", async () => {
+    const input = withManagedAttempt(options("grok", "managed-grok"));
+    const preflightStarted = join(scratch, "managed-grok.preflight");
+    const modelStarted = join(scratch, "managed-grok.model");
+    const invocationLog = join(scratch, "managed-grok.invocation.json");
+    process.env.FAKE_PREFLIGHT_STARTED_PATH = preflightStarted;
+    process.env.FAKE_MODEL_STARTED_PATH = modelStarted;
+    process.env.FAKE_INVOCATION_LOG_PATH = invocationLog;
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+
+    const exitCode = await main(runnerArgs(input).slice(1), Date.now(), {
+      stdout: (value) => stdout.push(value),
+      stderr: (value) => stderr.push(value),
+    });
+
+    expect(exitCode).toBe(64);
+    expect(stdout).toEqual([]);
+    expect(stderr.join("")).toContain(
+      "managed Grok attempts are unsupported because Grok cannot consume verified prompt bytes"
+    );
+    expect(existsSync(preflightStarted)).toBe(false);
+    expect(existsSync(modelStarted)).toBe(false);
+    expect(existsSync(invocationLog)).toBe(false);
+    expect(existsSync(input.outputPath)).toBe(false);
+    expect(existsSync(input.receiptPath)).toBe(false);
+  });
+
+  it("gives an explicit timeout precedence over a pending pause envelope", async () => {
+    process.env.FAKE_CLAUDE_PAUSE_EXIT = "1";
+    process.env.FAKE_CLAUDE_PAUSE_WAIT_FOR_SIGNAL = "1";
+    const modelStarted = join(scratch, "managed-pause-timeout.model");
+    const invocationLog = join(scratch, "managed-pause-timeout.invocation.json");
+    process.env.FAKE_MODEL_STARTED_PATH = modelStarted;
+    process.env.FAKE_INVOCATION_LOG_PATH = invocationLog;
+    const input = managedOptions("managed-pause-timeout", 1_000);
+
+    const result = await runLane(input);
+
+    expect(result.exitCode).toBe(124);
+    expect(existsSync(modelStarted)).toBe(true);
+    expectManagedInvocation(input, invocationLog);
+    expect(receipt(input.receiptPath)).toMatchObject({
+      status: "timed-out",
+      preflight: { status: "passed" },
+      providerPause: null,
+      error: {
+        evidence: expect.stringContaining("You've hit your session limit"),
+      },
+    });
+  });
+
+  it("gives cancellation precedence over a received pause envelope", async () => {
+    const input = managedOptions("managed-pause-cancelled");
+    const modelStarted = join(scratch, "managed-pause-cancelled.model");
+    const pauseWritten = join(scratch, "managed-pause-cancelled.pause-written");
+    const invocationLog = join(scratch, "managed-pause-cancelled.invocation.json");
+    const runner = Bun.spawn([process.execPath, ...runnerArgs(input)], {
+      cwd: scratch,
+      env: {
+        ...process.env,
+        FAKE_CLAUDE_PAUSE_EXIT: "1",
+        FAKE_CLAUDE_PAUSE_WAIT_FOR_SIGNAL: "1",
+        FAKE_CLAUDE_PAUSE_WRITTEN_PATH: pauseWritten,
+        FAKE_MODEL_STARTED_PATH: modelStarted,
+        FAKE_INVOCATION_LOG_PATH: invocationLog,
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const stdout = new Response(runner.stdout).text();
+    const stderr = new Response(runner.stderr).text();
+    await waitFor(pauseWritten);
+    runner.kill("SIGTERM");
+
+    expect(await exitWithin(runner, 3_000)).toBe(130);
+    await Promise.all([stdout, stderr]);
+    expect(existsSync(modelStarted)).toBe(true);
+    expectManagedInvocation(input, invocationLog);
+    expect(receipt(input.receiptPath)).toMatchObject({
+      status: "cancelled",
+      providerPause: null,
+      error: {
+        evidence: expect.stringContaining("You've hit your session limit"),
+      },
+    });
+  });
+
+  it("normalizes the executable found through a trailing-slash PATH entry", async () => {
+    process.env.PATH = `${bin}/:${dirname(process.execPath)}:${previousPath ?? ""}`;
+    const input = options("claude", "normalized-executable");
+
+    const result = await runLane(input);
+
+    expect(result.exitCode).toBe(0);
+    const normalized = resolve(bin, "claude");
+    expect(receipt(input.receiptPath)).toMatchObject({
+      executable: normalized,
+      preflight: { argv: [normalized, ...preflightCommand("claude").args] },
+      argv: [normalized, ...invocationCommand(input).args],
+    });
+  });
+
+  it("binds a successful managed receipt to the exact provider invocation", async () => {
+    const input = managedOptions("managed-complete");
+    const invocationLog = join(scratch, "managed-complete.invocation.json");
+    process.env.FAKE_INVOCATION_LOG_PATH = invocationLog;
+
+    const result = await runLane(input);
+
+    expect(result.exitCode).toBe(0);
+    expectManagedInvocation(input, invocationLog);
+    const recorded = receipt(input.receiptPath);
+    expect(recorded).toMatchObject({
+      schemaVersion: 2,
+      status: "complete",
+      managedAttempt: { ...input.managedAttempt, verified: true },
+      providerPause: null,
+      error: null,
+    });
+    if (recorded.status !== "complete") throw new Error("missing completion receipt");
+    expect(recorded.outputSha256).toBe(sha256Hex(readFileSync(input.outputPath)));
+  });
+
+  it("round-trips managed receipts after omitting malformed provider telemetry", async () => {
+    process.env.FAKE_MALFORMED_TELEMETRY = "1";
+    for (const provider of ["claude", "codex"] as const) {
+      const input = withManagedAttempt(options(provider, `managed-malformed-${provider}`));
+
+      const result = await runLane(input);
+      const recorded = receipt(input.receiptPath);
+
+      expect(result.exitCode).toBe(0);
+      expect(recorded).toMatchObject({
+        status: "complete",
+        managedAttempt: { ...input.managedAttempt, verified: true },
+        usage: null,
+        costUsd: null,
+      });
+    }
+  });
+
+  it("hashes and sends the exact managed prompt bytes", async () => {
+    const bytes = Uint8Array.from([0xff, 0x00, 0x61, 0x0a]);
+    writeFileSync(join(scratch, "prompt.md"), bytes);
+    const input = managedOptions("managed-bytes");
+    const invocationLog = join(scratch, "managed-bytes.invocation.json");
+    process.env.FAKE_INVOCATION_LOG_PATH = invocationLog;
+
+    const result = await runLane(input);
+
+    expect(result.exitCode).toBe(0);
+    expectManagedInvocation(input, invocationLog);
+    expect(input.managedAttempt?.promptSha256).toBe(sha256Hex(bytes));
+  });
+
   for (const [parent, provider] of [
     ["claude", "codex"],
     ["claude", "grok"],
@@ -324,6 +798,19 @@ describe("runLane", () => {
       modelVerified: false,
       modelEvidence: "pinned-argv",
     });
+  });
+
+  it("bounds a provider parse failure so the serialized receipt remains valid", async () => {
+    process.env.FAKE_CODEX_FAILURE_LENGTH = "5000";
+    const input = options("codex", "long-provider-error");
+
+    const result = await runLane(input);
+    const recorded = receipt(input.receiptPath);
+
+    expect(result.exitCode).toBe(65);
+    expect(recorded.status).toBe("malformed-output");
+    expect(recorded.error?.message).toHaveLength(4_000);
+    expect(recorded.error?.evidence.length).toBeLessThanOrEqual(4_000);
   });
 
   it("classifies an unavailable model without falling back", async () => {
@@ -668,6 +1155,72 @@ describe("runLane", () => {
       status: "timed-out",
       preflight: { status: "timed-out" },
     });
+  });
+
+  it("uses monotonic elapsed time for a deadline after wall-clock rollback", async () => {
+    process.env.FAKE_MODEL_DELAY_MS = "1000";
+    const input = {
+      ...options("claude", "wall-clock-rollback"),
+      timeoutMs: 300,
+    };
+    const startedAt = Date.now() + 60_000;
+
+    const result = await runLane(input, startedAt);
+    const recorded = receipt(input.receiptPath);
+
+    expect(result.exitCode).toBe(124);
+    expect(recorded).toMatchObject({
+      status: "timed-out",
+      startedAt: new Date(startedAt).toISOString(),
+      preflight: { status: "passed" },
+    });
+    expect(recorded.elapsedMs).toBeGreaterThanOrEqual(250);
+    expect(Date.parse(recorded.completedAt) - Date.parse(recorded.startedAt)).toBe(
+      recorded.elapsedMs
+    );
+  });
+
+  it("dates a pause at the observed wall time after the wall clock jumps forward", async () => {
+    process.env.FAKE_CLAUDE_PAUSE_EXIT = "1";
+    const input = options("claude", "wall-clock-forward");
+    const wallTimeMs = Date.now() - 3_600_000;
+    const beforeRun = Date.now();
+
+    const result = await runLane(input, {
+      wallTimeMs,
+      monotonicTimeMs: performance.now(),
+    });
+    const recorded = receipt(input.receiptPath);
+
+    expect(result.exitCode).toBe(75);
+    expect(recorded.startedAt).toBe(new Date(wallTimeMs).toISOString());
+    expect(recorded.elapsedMs).toBeLessThan(60_000);
+    expect(Date.parse(recorded.completedAt)).toBeGreaterThanOrEqual(beforeRun);
+    expect(
+      Date.parse(recorded.completedAt) - Date.parse(recorded.startedAt)
+    ).toBeGreaterThanOrEqual(3_600_000);
+    if (recorded.status !== "provider-paused") throw new Error("missing pause receipt");
+    expect(recorded.providerPause.observedAt).toBe(recorded.completedAt);
+  });
+
+  it("never dates a pause before its start after the wall clock rolls back", async () => {
+    process.env.FAKE_CLAUDE_PAUSE_EXIT = "1";
+    const input = options("claude", "wall-clock-backward");
+    const wallTimeMs = Date.now() + 60_000;
+
+    const result = await runLane(input, {
+      wallTimeMs,
+      monotonicTimeMs: performance.now(),
+    });
+    const recorded = receipt(input.receiptPath);
+
+    expect(result.exitCode).toBe(75);
+    expect(recorded.startedAt).toBe(new Date(wallTimeMs).toISOString());
+    expect(Date.parse(recorded.completedAt) - Date.parse(recorded.startedAt)).toBe(
+      recorded.elapsedMs
+    );
+    if (recorded.status !== "provider-paused") throw new Error("missing pause receipt");
+    expect(recorded.providerPause.observedAt).toBe(recorded.completedAt);
   });
 
   it("spends one explicit deadline across preflight and model execution", async () => {

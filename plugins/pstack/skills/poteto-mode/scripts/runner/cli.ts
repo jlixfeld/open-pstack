@@ -1,9 +1,8 @@
 import { parseArgs as parseNodeArgs } from "node:util";
-import { resolvedOptions, runLane } from "./run.ts";
+import { resolvedOptions, runLane, type RunStart } from "./run.ts";
 import {
   ACCESS_MODES,
   EFFORTS,
-  MODEL_EFFORTS,
   PARENTS,
   PROVIDERS,
   type AccessMode,
@@ -13,16 +12,24 @@ import {
   type RunnerOptions,
   UsageError,
 } from "./types.ts";
+import {
+  validateRunnerRoute,
+  validateSafeId,
+  validateSafeLaneId,
+  validateSha256,
+} from "./validation.ts";
 
 const HELP = `Usage: pstack-runner --parent <claude|codex> --provider <claude|codex|grok> \\
   --model <slug> --effort <level> --mode <read-only|isolated-write> \\
-  --prompt <file> --cwd <dir> --output <file> --receipt <file> [--timeout <seconds>]
+  --prompt <file> --cwd <dir> --output <file> --receipt <file> [--timeout <seconds>] \\
+  [--lane-id <id> --attempt-id <id> --lane-fingerprint <sha256> --prompt-sha256 <sha256>]
 
 Runs exactly one external model lane. Same-provider calls are rejected; use the
 parent harness's native subagent primitive for those lanes. Output and receipt
 paths must not already exist. There is no implicit timeout. Pass --timeout only
 when the user or task supplies a real deadline; it is one end-to-end launcher
 deadline shared by setup, preflight, and model execution.
+All paths are normalized to absolute paths before managed identity is checked.
 `;
 
 interface Io {
@@ -57,6 +64,40 @@ function stringValue(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+function sha256(name: string, value: string): string {
+  if (!/^[a-f0-9]{64}$/i.test(value)) {
+    throw new UsageError(`${name} must be a SHA-256 hex digest`);
+  }
+  return validateSha256(value.toLowerCase(), name);
+}
+
+function managedAttempt(values: {
+  readonly laneId: unknown;
+  readonly attemptId: unknown;
+  readonly laneFingerprint: unknown;
+  readonly promptSha256: unknown;
+}): RunnerOptions["managedAttempt"] {
+  const entries = [
+    ["lane-id", stringValue(values.laneId)],
+    ["attempt-id", stringValue(values.attemptId)],
+    ["lane-fingerprint", stringValue(values.laneFingerprint)],
+    ["prompt-sha256", stringValue(values.promptSha256)],
+  ] as const;
+  const supplied = entries.filter(([, value]) => value !== undefined);
+  if (supplied.length === 0) return null;
+  if (supplied.length !== entries.length) {
+    throw new UsageError(
+      "lane-id, attempt-id, lane-fingerprint, and prompt-sha256 must be provided together"
+    );
+  }
+  return {
+    laneId: validateSafeLaneId(required("lane-id", entries[0][1]), "lane-id"),
+    attemptId: validateSafeId(required("attempt-id", entries[1][1]), "attempt-id"),
+    laneFingerprint: sha256("lane-fingerprint", required("lane-fingerprint", entries[2][1])),
+    promptSha256: sha256("prompt-sha256", required("prompt-sha256", entries[3][1])),
+  };
+}
+
 export function parseArgs(argv: readonly string[]): RunnerOptions | null {
   let parsed: ReturnType<typeof parseNodeArgs>;
   try {
@@ -75,6 +116,10 @@ export function parseArgs(argv: readonly string[]): RunnerOptions | null {
         output: { type: "string" },
         receipt: { type: "string" },
         timeout: { type: "string" },
+        "lane-id": { type: "string" },
+        "attempt-id": { type: "string" },
+        "lane-fingerprint": { type: "string" },
+        "prompt-sha256": { type: "string" },
         help: { type: "boolean", short: "h", default: false },
       },
     });
@@ -98,12 +143,22 @@ export function parseArgs(argv: readonly string[]): RunnerOptions | null {
   const provider = oneOf("provider", stringValue(parsed.values.provider), PROVIDERS) as Provider;
   const model = required("model", stringValue(parsed.values.model));
   const effort = oneOf("effort", stringValue(parsed.values.effort), EFFORTS) as Effort;
-  const selectable = MODEL_EFFORTS[`${provider}:${model}` as keyof typeof MODEL_EFFORTS];
-  if (selectable === undefined || !(selectable as readonly Effort[]).includes(effort)) {
-    throw new UsageError(`unsupported model or effort: ${provider}:${model}@${effort}`);
-  }
+  const parent = oneOf("parent", stringValue(parsed.values.parent), PARENTS) as Parent;
+  const attempt = managedAttempt({
+    laneId: parsed.values["lane-id"],
+    attemptId: parsed.values["attempt-id"],
+    laneFingerprint: parsed.values["lane-fingerprint"],
+    promptSha256: parsed.values["prompt-sha256"],
+  });
+  validateRunnerRoute({
+    parent,
+    provider,
+    model,
+    effort,
+    managed: attempt !== null,
+  });
   return resolvedOptions({
-    parent: oneOf("parent", stringValue(parsed.values.parent), PARENTS) as Parent,
+    parent,
     provider,
     model,
     effort,
@@ -113,12 +168,16 @@ export function parseArgs(argv: readonly string[]): RunnerOptions | null {
     outputPath: required("output", stringValue(parsed.values.output)),
     receiptPath: required("receipt", stringValue(parsed.values.receipt)),
     timeoutMs: timeoutSeconds === null ? null : timeoutSeconds * 1_000,
+    managedAttempt: attempt,
   });
 }
 
 export async function main(
   argv: readonly string[],
-  startedAt: number = Date.now(),
+  startedAt: number | RunStart = {
+    wallTimeMs: Date.now(),
+    monotonicTimeMs: performance.now(),
+  },
   io: Io = defaultIo
 ): Promise<number> {
   try {

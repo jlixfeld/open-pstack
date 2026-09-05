@@ -92,14 +92,28 @@ pstack-runner \
   --cwd <repository or dedicated worktree> \
   --output <unique final-response file> \
   --receipt <unique receipt file> \
-  [--timeout <seconds>]
+  [--timeout <seconds>] \
+  [--lane-id <id> --attempt-id <id> --lane-fingerprint <sha256> --prompt-sha256 <sha256>]
 ```
+
+Managed orchestration supplies the final four flags as one all-or-none identity.
+The canonical lane fingerprint is the SHA-256 of `JSON.stringify` over this
+fixed-key object, with absolute `cwd` and `promptPath`: `parent`, `provider`,
+`model`, `effort`, `mode`, `cwd`, `promptPath`, `promptSha256`, `timeoutMs`.
+The runner is one-shot: it writes receipt schema v2 and never substitutes a model or provider. It starts the model process at most once and never retries model execution; its only sleep or retry is the bounded Grok authentication preflight described below. Exit 75 and a schema-v2
+`provider-paused` receipt mean a Claude session-limit pause, neither success
+nor a dropout. The runner classifies provider state independently of managed
+identity. A managed coordinator preserves the exact lane for its scheduled
+retry. An unmanaged caller preserves the paused result and keeps the panel
+incomplete; it does not apply Arena, Swarm, or Interrogate's N-1 dropout rule.
 
 Pass arguments as an argv array or quote every path. Never interpolate prompt text into a shell command. The launcher preflights the assigned CLI and authentication, invokes the model exactly once, disables recursive agents and ambient skill dispatch where the CLI supports it, restricts the built-in tool surface, and records the exact provider/model/effort flags. External lanes do not receive the parent's MCP surface. Keep MCP-dependent Why and Reflect roles on `inherit-parent` or `auto`. The launcher never falls back.
 
 Grok authentication preflight has one bounded retry. If the first `grok models` result would be classified as unauthenticated, the runner waits five seconds and tries the same preflight once more. A second failure is terminal. The delay and second attempt share the runner's absolute deadline and cancellation latch, and the receipt keeps evidence from both attempts. Model execution is never retried.
 
 The parent tool sandbox still governs whether a subscribed child CLI can reach its credentials and network. Run setup's live probe from the actual parent profile.
+
+Every managed ordinary or elevated retry uses the unchanged launch plan and fresh managed attempt identity returned by `orch --json lane retry`; never hand-invent attempt IDs or artifact paths. Call `orch --json lane retry` directly; it reconciles the prior receipt under the store lock before it claims a fresh attempt. Do not call `orch --json lane tick` first because that command may give the provider to a live sibling. Execute the retry command and argv unchanged.
 
 Codex on macOS has one scoped exception. Claude Code stores a normal `claude auth login` session in the macOS Keychain, which the Codex sandbox can block even when the user is logged in. When a Codex parent launches a Claude lane, request one elevated attempt only when the sandboxed receipt contains all of these fields:
 
@@ -110,7 +124,7 @@ Codex on macOS has one scoped exception. Claude Code stores a normal `claude aut
 
 For a Claude preflight, this combination means that `claude auth status --json` returned a parseable JSON object with boolean `loggedIn: false`. The exit code does not change this classification. The runner classifies malformed JSON, a missing or nonboolean `loggedIn` field, and unrelated nonzero output as `child-failed`. Do not infer this condition from `preflight.evidence`.
 
-Only the macOS Keychain access requires privilege escalation; the provider payload is already authorized by the pstack dispatch. Phrase the approval rationale only as permission for the runner to read the existing Claude CLI session. Suggest a prefix rule that contains only the absolute `pstack-runner` executable path. Run the new attempt with `sandbox_permissions: "require_escalated"` on the parent tool call. Keep `--parent`, `--provider`, `--model`, `--effort`, `--mode`, `--prompt`, `--cwd`, and `--timeout` exactly the same as the first attempt. If the first attempt omitted `--timeout`, omit it again. Use fresh unique paths for `--output` and `--receipt`. The new paths must not exist. Preserve the first receipt alongside the new receipt and any successful output. Do not read, print, copy, or export the credential.
+Only the macOS Keychain access requires privilege escalation; the provider payload is already authorized by the pstack dispatch. Phrase the approval rationale only as permission for the runner to read the existing Claude CLI session. Suggest a prefix rule that contains only the absolute `pstack-runner` executable path. Run the new attempt with `sandbox_permissions: "require_escalated"` on the parent tool call. Keep `--parent`, `--provider`, `--model`, `--effort`, `--mode`, `--prompt`, `--cwd`, and `--timeout` exactly the same as the first attempt. If the first attempt omitted `--timeout`, omit it again. Use fresh unique paths for `--output` and `--receipt`. The new paths must not exist. For a managed lane, obtain that unchanged route, fresh identity, and fresh paths only by executing the complete retry plan returned by `orch --json lane retry`; do not change the returned plan. For an unmanaged lane, choose the fresh paths directly. Preserve the first receipt alongside the new receipt and any successful output. Do not read, print, copy, or export the credential.
 
 If the elevated preflight still reports unauthenticated, or if the privilege request is rejected, record a genuine dropout. Do not retry again or substitute a model.
 
@@ -136,10 +150,10 @@ Success requires all of these:
 1. Exit status `0`.
 2. Receipt status `complete`.
 3. Either `modelVerified: true` with `modelEvidence: "provider-report"`, or a Codex receipt with `reportedModel: null`, `modelVerified: false`, and `modelEvidence: "pinned-argv"`. Codex 0.149.0 accepts the exact `--model` argument but does not report the served model in its JSONL stream.
-4. A non-empty output file.
+4. A non-empty output file whose exact bytes match the receipt's required `outputSha256`.
 
-The receipt also carries elapsed time, token usage when the CLI exposes it, and cost when available. Keep it with the arena or review artifacts so parent-harness comparisons are evidence-based.
+Schema-v2 complete receipts bind the output bytes with `outputSha256`. Provider-paused and failure receipts set that field to `null`. The receipt also carries elapsed time, token usage when the CLI exposes it, and cost when available. Keep it with the arena or review artifacts so parent-harness comparisons are evidence-based.
 
-Any missing CLI, failed login, unavailable model, explicit timeout, cancellation, catchable post-reservation launcher failure, non-zero child exit, malformed result, or model mismatch is a receipt-bearing dropout. Record it and apply the calling skill's existing dropout policy. A `cancelled` receipt proves that the runner received the signal; its `signal` field is non-null only when the runner sent that signal to a still-active direct CLI child, and remains null when cancellation only stopped a post-exit pipe drain. The provider CLI owns any processes it starts beneath that direct child; the receipt does not claim a process-tree kill. Do not delete or overwrite the receipt. Never substitute the parent model, retry another provider, or reinterpret an external descriptor as a native model slug.
+Any missing CLI, failed login, unavailable model, explicit timeout, cancellation, catchable post-reservation launcher failure, non-zero child exit, malformed result, or model mismatch is a receipt-bearing dropout. Record it and apply the calling skill's existing dropout policy. Only runner exit 75 paired with a schema-v2 `provider-paused` receipt is excluded, whether managed or unmanaged. Managed orchestration retries the exact lane no sooner than its due time. Without managed identity, preserve the receipt and report the panel as paused rather than proceeding with N-1; any later invocation remains the same explicitly selected route. A `cancelled` receipt proves that the runner received the signal; its `signal` field is non-null only when the runner sent that signal to a still-active direct CLI child, and remains null when cancellation only stopped a post-exit pipe drain. The provider CLI owns any processes it starts beneath that direct child; the receipt does not claim a process-tree kill. Do not delete or overwrite the receipt. Never substitute the parent model, retry another provider, or reinterpret an external descriptor as a native model slug.
 
 Start native and external lanes in the same fan-out phase, then wait for all of them before judging. A judge must not read candidate paths while their owners are still writing.

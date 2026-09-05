@@ -1,7 +1,110 @@
 import { describe, expect, it } from "bun:test";
-import { parseProviderOutput, reportedModelMatches } from "./parse-output.ts";
+import {
+  parseClaudeSessionLimit,
+  parseProviderOutput,
+  reportedModelMatches,
+} from "./parse-output.ts";
+
+const OBSERVED_CLAUDE_SESSION_LIMIT = JSON.stringify({
+  duration_api_ms: 65277,
+  stop_reason: "stop_sequence",
+  session_id: "098e45a4-671d-4f4e-aaaa-51abd7fbc8a3",
+  total_cost_usd: 1.0764304999999998,
+  usage: {
+    input_tokens: 10,
+    cache_creation_input_tokens: 80240,
+    cache_read_input_tokens: 298407,
+    output_tokens: 4932,
+  },
+  modelUsage: { "claude-opus-5": { inputTokens: 10 } },
+  terminal_reason: "api_error",
+  is_error: true,
+  api_error_status: 429,
+  result: "You've hit your session limit · resets 2:10pm (America/Toronto)",
+  type: "result",
+});
 
 describe("parseProviderOutput", () => {
+  it("recognizes the observed structured Claude session-limit envelope", () => {
+    expect(
+      parseClaudeSessionLimit(
+        OBSERVED_CLAUDE_SESSION_LIMIT,
+        "2026-09-04T18:00:00.000Z"
+      )
+    ).toMatchObject({
+      kind: "claude-session-limit",
+      terminalReason: "api_error",
+      apiStatus: 429,
+      observedAt: "2026-09-04T18:00:00.000Z",
+      message: "You've hit your session limit · resets 2:10pm (America/Toronto)",
+      resetEvidence: "You've hit your session limit · resets 2:10pm (America/Toronto)",
+    });
+  });
+
+  it("keeps minute-less and unknown-zone reset evidence opaque", () => {
+    const evidence = [
+      "You've hit your session limit · resets 2pm (America/Toronto)",
+      "You've hit your session limit · resets someday (Mars/Olympus Mons)",
+    ];
+    for (const result of evidence) {
+      expect(parseClaudeSessionLimit(
+        JSON.stringify({
+          type: "result",
+          is_error: true,
+          terminal_reason: "api_error",
+          api_error_status: 429,
+          result,
+        }),
+        "2026-09-04T18:00:00.000Z"
+      )?.resetEvidence).toBe(result);
+    }
+  });
+
+  it("rejects unstructured and structurally invalid Claude pause lookalikes", () => {
+    const observedAt = "2026-09-04T18:00:00.000Z";
+    const invalid = [
+      "You've hit your session limit · resets 2:10pm (America/Toronto)",
+      "{",
+      JSON.stringify({
+        type: "result",
+        is_error: true,
+        terminal_reason: "api_error",
+        api_error_status: "429",
+        result: "You've hit your session limit",
+      }),
+      JSON.stringify({
+        is_error: true,
+        terminal_reason: "api_error",
+        api_error_status: 429,
+        result: "You've hit your session limit",
+      }),
+      JSON.stringify({
+        type: "turn.failed",
+        is_error: true,
+        terminal_reason: "api_error",
+        api_error_status: 429,
+        result: "You've hit your session limit",
+      }),
+      JSON.stringify({
+        type: "result",
+        is_error: true,
+        terminal_reason: "api_error",
+        api_error_status: 429,
+        result: "You've hit your session limitations",
+      }),
+      JSON.stringify({
+        type: "result",
+        is_error: true,
+        terminal_reason: "api_error",
+        api_error_status: 429,
+        result: `You've hit your session limit ${"x".repeat(1_000)}`,
+      }),
+    ];
+    for (const stdout of invalid) {
+      expect(parseClaudeSessionLimit(stdout, observedAt)).toBeNull();
+    }
+  });
+
   it("extracts Claude text, model, usage, cost, and session", () => {
     const parsed = parseProviderOutput(
       "claude",
@@ -57,6 +160,64 @@ describe("parseProviderOutput", () => {
         reasoningTokens: 2,
       },
     });
+  });
+
+  it("omits malformed token and cost telemetry for every provider", () => {
+    const malformedUsage = {
+      input_tokens: -1,
+      cached_input_tokens: 1.5,
+      cache_creation_input_tokens: Number.MAX_SAFE_INTEGER + 1,
+      output_tokens: -2,
+      reasoning_tokens: 3.5,
+      total_tokens: Number.POSITIVE_INFINITY,
+    };
+    const cases = [
+      [
+        "claude",
+        JSON.stringify({
+          result: "CLAUDE_OK",
+          usage: malformedUsage,
+          total_cost_usd: -0.01,
+          modelUsage: { "claude-fable-5-1": {} },
+        }),
+        "",
+        "claude-fable-5-1",
+      ],
+      [
+        "codex",
+        [
+          JSON.stringify({ type: "thread.started", thread_id: "codex-session" }),
+          JSON.stringify({
+            type: "item.completed",
+            item: { type: "agent_message", text: "CODEX_OK" },
+          }),
+          JSON.stringify({ type: "turn.completed", usage: malformedUsage }),
+        ].join("\n"),
+        "",
+        "gpt-5.6-sol",
+      ],
+      [
+        "grok",
+        JSON.stringify({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: "GROK_OK",
+          usage: malformedUsage,
+          total_cost_usd: -0.02,
+          modelUsage: { "grok-4.6-build": {} },
+        }),
+        "",
+        "grok-4.6",
+      ],
+    ] as const;
+
+    for (const [provider, stdout, stderr, model] of cases) {
+      expect(parseProviderOutput(provider, stdout, stderr, model)).toMatchObject({
+        usage: null,
+        costUsd: null,
+      });
+    }
   });
 
   it("accepts Grok's reported build suffix", () => {

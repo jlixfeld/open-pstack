@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
 import {
-  access,
+  chmod,
   mkdir,
   open,
   readFile,
@@ -10,13 +10,50 @@ import {
   rename,
   rm,
   unlink,
-  writeFile,
 } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import { Database } from "bun:sqlite";
+import {
+  checkUnit,
+  register as registerLane,
+  release as releaseLane,
+  retry as retryLane,
+  tick as tickLanes,
+  type Lane,
+  type LaneCheck,
+  type LaneClock,
+  type LaneTickResult,
+  type LaunchPlan,
+  type RegisterParams,
+} from "./lanes.ts";
+import { initializeLaneRegistry } from "./lane-registry.ts";
+import {
+  NotFoundError,
+  UserError,
+  UsageError,
+} from "./errors.ts";
+import {
+  errorCode,
+  pathExists as exists,
+  writeFileAtomically as atomicWrite,
+} from "./filesystem.ts";
+export {
+  NotFoundError,
+  UserError,
+  UsageError,
+  type NotFoundOutput,
+} from "./errors.ts";
 
 const UNIT_HEADER = "id\ttrack\tstate\tbranch\tpr\tsha\tbrief";
 const LEDGER_HEADER = "pr\tsha\tverdict\tevidence\tverifier\tts";
 const LOCK_FILE = ".orch.lock";
+const LOCK_RECOVERY_FILE = ".orch.lock.recovery";
+const LOCK_RECOVERY_GUARD_FILE = ".orch.lock.recovery.sqlite";
+
+export const TERMINAL_RECONCILIATION_STATES = [
+  "abandoned",
+  "zombie-reconciled",
+] as const;
 
 export type Verdict =
   | "live-ui-verified"
@@ -178,9 +215,21 @@ export interface OpenStoreOptions {
   readonly force?: boolean;
   readonly onLockStolen?: (holder: string) => void;
   readonly onStaleLock?: (holder: string) => void;
+  readonly now?: LaneClock;
 }
 
 export interface Store {
+  readonly lanes: {
+    readonly register: (params: RegisterParams) => Promise<Lane>;
+    readonly tick: () => Promise<LaneTickResult>;
+    readonly check: (unitId: string) => Promise<LaneCheck>;
+    readonly retry: (laneId: string) => Promise<LaunchPlan>;
+    readonly release: (params: {
+      readonly laneId: string;
+      readonly attemptId: string;
+      readonly reason: string;
+    }) => Promise<Lane>;
+  };
   readonly units: {
     readonly add: (params: AddUnitParams) => Promise<Unit>;
     readonly set: (params: SetUnitParams) => Promise<Unit>;
@@ -219,32 +268,37 @@ export interface Store {
   readonly close: () => Promise<void>;
 }
 
-export interface NotFoundOutput {
-  readonly compact: string;
-  readonly json: unknown;
+function unitIdSet(units: readonly Unit[]): ReadonlySet<string> {
+  const result = new Set<string>();
+  for (const unit of units) {
+    if (result.has(unit.id)) {
+      throw new UserError(`units.tsv contains duplicate unit id ${unit.id}`);
+    }
+    result.add(unit.id);
+  }
+  return result;
 }
 
-export class UserError extends Error {}
-export class UsageError extends UserError {}
-export class NotFoundError extends UserError {
-  public constructor(
-    message: string,
-    public readonly output?: NotFoundOutput
-  ) {
-    super(message);
-  }
+function isTerminalReconciliationState(state: string): boolean {
+  return TERMINAL_RECONCILIATION_STATES.some(
+    (candidate) => candidate === state
+  );
 }
 
-function errorCode(error: unknown): string | null {
-  if (
-    error !== null &&
-    typeof error === "object" &&
-    "code" in error &&
-    typeof error.code === "string"
-  ) {
-    return error.code;
-  }
-  return null;
+function terminalUnitIdSet(units: readonly Unit[]): ReadonlySet<string> {
+  return new Set(
+    units
+      .filter((unit) => isTerminalReconciliationState(unit.state))
+      .map((unit) => unit.id)
+  );
+}
+
+function terminalUnitStateMap(units: readonly Unit[]): ReadonlyMap<string, string> {
+  return new Map(
+    units
+      .filter((unit) => isTerminalReconciliationState(unit.state))
+      .map((unit) => [unit.id, unit.state] as const)
+  );
 }
 
 function errorMessage(error: unknown): string {
@@ -321,31 +375,6 @@ function positiveInteger(value: number, label: string): number {
   return value;
 }
 
-async function exists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch (error) {
-    if (errorCode(error) === "ENOENT") {
-      return false;
-    }
-    throw error;
-  }
-}
-
-async function atomicWrite(path: string, contents: string): Promise<void> {
-  const temporary = join(
-    dirname(path),
-    `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`
-  );
-  try {
-    await writeFile(temporary, contents, { flag: "wx" });
-    await rename(temporary, path);
-  } finally {
-    await rm(temporary, { force: true });
-  }
-}
-
 async function writeIfMissing(path: string, contents: string): Promise<void> {
   if (!(await exists(path))) {
     await atomicWrite(path, contents);
@@ -378,29 +407,107 @@ function holderIsDead(holder: string): boolean {
   }
 }
 
+async function writePidLock(path: string, pid: string): Promise<void> {
+  const handle = await open(path, "wx");
+  try {
+    await handle.writeFile(`${pid}\n`);
+  } catch (error) {
+    await handle.close();
+    await unlink(path).catch(() => undefined);
+    throw error;
+  }
+  await handle.close();
+}
+
+async function readLockHolder(path: string): Promise<string | null> {
+  try {
+    return (await readFile(path, "utf8")).trim() || "unknown";
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return null;
+    return "unknown";
+  }
+}
+
+async function releaseOwnedLock(path: string, pid: string): Promise<void> {
+  try {
+    if ((await readFile(path, "utf8")).trim() === pid) {
+      await unlink(path);
+    }
+  } catch (error) {
+    if (errorCode(error) !== "ENOENT") throw error;
+  }
+}
+
+function guardIsContended(error: unknown): boolean {
+  return (
+    errorCode(error) === "SQLITE_BUSY" || errorCode(error) === "SQLITE_LOCKED"
+  );
+}
+
+async function acquireRecoveryLock(store: string): Promise<() => Promise<void>> {
+  const guardPath = join(store, LOCK_RECOVERY_GUARD_FILE);
+  const database = new Database(guardPath, { create: true, strict: true });
+  try {
+    await chmod(guardPath, 0o600);
+    database.exec("PRAGMA busy_timeout = 0");
+    database.exec("BEGIN IMMEDIATE");
+  } catch (error) {
+    database.close();
+    if (guardIsContended(error)) {
+      throw new UserError("store lock recovery is held");
+    }
+    throw error;
+  }
+
+  try {
+    await rm(join(store, LOCK_RECOVERY_FILE), { force: true });
+  } catch (error) {
+    try {
+      database.exec("ROLLBACK");
+    } finally {
+      database.close();
+    }
+    throw error;
+  }
+
+  return async () => {
+    try {
+      database.exec("COMMIT");
+    } catch (error) {
+      // The guard transaction carries no data. On a fresh guard file COMMIT
+      // only persists SQLite's own header, which needs an exclusive lock
+      // that any concurrent guard opener's shared lock denies. Rolling back
+      // on close releases the guard just the same, so contention here must
+      // not fail a caller that already owns the store lock.
+      if (!guardIsContended(error)) throw error;
+    } finally {
+      database.close();
+    }
+  };
+}
+
 async function acquireLock(
   store: string,
   options: OpenStoreOptions
 ): Promise<() => Promise<void>> {
   const path = join(store, LOCK_FILE);
   const pid = String(process.pid);
-  const create = async (): Promise<void> => {
-    const handle = await open(path, "wx");
-    await handle.writeFile(`${pid}\n`);
-    await handle.close();
+  const create = (): Promise<void> => writePidLock(path, pid);
+  const held = async (): Promise<never> => {
+    const holder = (await readLockHolder(path)) ?? "unknown";
+    throw new UserError(`store lock held by pid ${holder}`);
   };
-
-  const takeOver = async (): Promise<void> => {
-    await unlink(path);
+  const replace = async (): Promise<void> => {
+    try {
+      await unlink(path);
+    } catch (error) {
+      if (errorCode(error) !== "ENOENT") throw error;
+    }
     try {
       await create();
-    } catch (retryError) {
-      if (errorCode(retryError) === "EEXIST") {
-        const retryHolder =
-          (await readFile(path, "utf8")).trim() || "unknown";
-        throw new UserError(`store lock held by pid ${retryHolder}`);
-      }
-      throw retryError;
+    } catch (error) {
+      if (errorCode(error) === "EEXIST") return held();
+      throw error;
     }
   };
 
@@ -410,34 +517,31 @@ async function acquireLock(
     if (errorCode(error) !== "EEXIST") {
       throw error;
     }
-    let holder = "unknown";
+    const releaseRecovery = await acquireRecoveryLock(store);
     try {
-      holder = (await readFile(path, "utf8")).trim() || "unknown";
-    } catch {
-      holder = "unknown";
-    }
-    if (holderIsDead(holder)) {
-      options.onStaleLock?.(holder);
-      await takeOver();
-    } else if (options.force) {
-      options.onLockStolen?.(holder);
-      await takeOver();
-    } else {
-      throw new UserError(`store lock held by pid ${holder}`);
+      const holder = await readLockHolder(path);
+      if (holder === null) {
+        try {
+          await create();
+        } catch (retryError) {
+          if (errorCode(retryError) === "EEXIST") await held();
+          throw retryError;
+        }
+      } else if (holderIsDead(holder)) {
+        options.onStaleLock?.(holder);
+        await replace();
+      } else if (options.force) {
+        options.onLockStolen?.(holder);
+        await replace();
+      } else {
+        throw new UserError(`store lock held by pid ${holder}`);
+      }
+    } finally {
+      await releaseRecovery();
     }
   }
 
-  return async (): Promise<void> => {
-    try {
-      if ((await readFile(path, "utf8")).trim() === pid) {
-        await unlink(path);
-      }
-    } catch (error) {
-      if (errorCode(error) !== "ENOENT") {
-        throw error;
-      }
-    }
-  };
+  return () => releaseOwnedLock(path, pid);
 }
 
 async function readTsv(
@@ -1241,6 +1345,74 @@ export function openStore(
   };
 
   return {
+    lanes: {
+      register: async (params) => {
+        await beginWrite();
+        const units = await readUnits(store);
+        const unit = units.find((row) => row.id === params.unitId);
+        if (unit === undefined) throw new NotFoundError(`unit ${params.unitId} not found`);
+        const unitIds = unitIdSet(units);
+        return registerLane(
+          store,
+          params,
+          unitIds,
+          terminalUnitIdSet(units),
+          options.now
+        );
+      },
+      tick: async () => {
+        await beginWrite();
+        const units = await readUnits(store);
+        const unitIds = unitIdSet(units);
+        return tickLanes(
+          store,
+          unitIds,
+          terminalUnitIdSet(units),
+          options.now
+        );
+      },
+      check: async (unitId) => {
+        await beginWrite();
+        const id = requiredCell(unitId, "unit id");
+        const units = await readUnits(store);
+        if (!units.some((row) => row.id === id)) {
+          throw new NotFoundError(`unit ${id} not found`);
+        }
+        const unitIds = unitIdSet(units);
+        return checkUnit(
+          store,
+          id,
+          unitIds,
+          terminalUnitIdSet(units)
+        );
+      },
+      retry: async (laneId) => {
+        await beginWrite();
+        const units = await readUnits(store);
+        const unitIds = unitIdSet(units);
+        return retryLane(
+          store,
+          requiredCell(laneId, "lane id"),
+          unitIds,
+          terminalUnitStateMap(units),
+          options.now
+        );
+      },
+      release: async (params) => {
+        await beginWrite();
+        const units = await readUnits(store);
+        const unitIds = unitIdSet(units);
+        return releaseLane(
+          store,
+          requiredCell(params.laneId, "lane id"),
+          requiredCell(params.attemptId, "attempt id"),
+          requiredLine(params.reason, "release reason"),
+          unitIds,
+          terminalUnitIdSet(units),
+          options.now
+        );
+      },
+    },
     units: {
       add: async (params) => {
         await beginWrite();
@@ -1273,6 +1445,21 @@ export function openStore(
         const old = rows[index];
         if (index < 0 || old === undefined) {
           throw new NotFoundError(`unit ${id} not found`);
+        }
+        const terminalReconciliation = isTerminalReconciliationState(state);
+        if (
+          old.state !== state &&
+          !terminalReconciliation &&
+          !(await checkUnit(
+            store,
+            id,
+            unitIdSet(rows),
+            terminalUnitIdSet(rows)
+          )).ready
+        ) {
+          throw new UserError(
+            `unit ${id} is blocked by incomplete managed provider lanes`
+          );
         }
         const row: Unit = {
           ...old,
@@ -1583,6 +1770,7 @@ export function openStore(
       await writeIfMissing(join(store, "gates.md"), "");
       await writeIfMissing(join(store, "preferences.md"), "");
       await writeIfMissing(join(store, "frontier.json"), "{}\n");
+      await initializeLaneRegistry(store);
       return { store };
     },
     close: async () => {

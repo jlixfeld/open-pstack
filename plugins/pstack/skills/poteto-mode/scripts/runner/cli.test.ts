@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { parseArgs } from "./cli.ts";
 
 function argv(extra: readonly string[] = []): string[] {
@@ -33,6 +33,62 @@ describe("runner CLI parsing", () => {
 
   it("honors an explicit positive timeout", () => {
     expect(parseArgs(argv(["--timeout", "5400"]))?.timeoutMs).toBe(5_400_000);
+  });
+
+  it("accepts managed identity only as one complete group", () => {
+    const digest = "a".repeat(64);
+    expect(parseArgs(argv([
+      "--lane-id", "manifest-review-claude",
+      "--attempt-id", "manifest-review-claude-000001",
+      "--lane-fingerprint", digest,
+      "--prompt-sha256", digest,
+    ]))?.managedAttempt).toEqual({
+      laneId: "manifest-review-claude",
+      attemptId: "manifest-review-claude-000001",
+      laneFingerprint: digest,
+      promptSha256: digest,
+    });
+    expect(() => parseArgs(argv(["--lane-id", "manifest-review-claude"]))).toThrow(
+      "must be provided together"
+    );
+    expect(() => parseArgs(argv([
+      "--lane-id", "../escape",
+      "--attempt-id", "attempt",
+      "--lane-fingerprint", digest,
+      "--prompt-sha256", digest,
+    ]))).toThrow("lane-id must match");
+    expect(() => parseArgs(argv([
+      "--lane-id", "Review",
+      "--attempt-id", "attempt",
+      "--lane-fingerprint", digest,
+      "--prompt-sha256", digest,
+    ]))).toThrow("must be lowercase");
+  });
+
+  it("normalizes every path before managed identity is checked", () => {
+    const digest = "a".repeat(64);
+    const parsed = parseArgs(argv([
+      "--prompt", "prompt.md",
+      "--cwd", ".",
+      "--output", "output.md",
+      "--receipt", "receipt.json",
+      "--lane-id", "lane",
+      "--attempt-id", "lane-000001",
+      "--lane-fingerprint", digest,
+      "--prompt-sha256", digest,
+    ]));
+    expect(parsed).toMatchObject({
+      promptPath: resolve("prompt.md"),
+      cwd: resolve("."),
+      outputPath: resolve("output.md"),
+      receiptPath: resolve("receipt.json"),
+      managedAttempt: {
+        laneId: "lane",
+        attemptId: "lane-000001",
+        laneFingerprint: digest,
+        promptSha256: digest,
+      },
+    });
   });
 
   it("rejects a non-positive timeout", () => {

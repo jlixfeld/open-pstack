@@ -11,6 +11,8 @@ import {
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Database } from "bun:sqlite";
+import { parseArgs as parseRunnerArgs } from "../runner/cli.ts";
 import {
   NotFoundError,
   UserError,
@@ -191,6 +193,16 @@ describe("Store", () => {
       join(directory, "ledger.tsv"),
       "utf8"
     );
+    const firstRegistry = await readFile(
+      join(directory, "provider-lanes", "registry.json"),
+      "utf8"
+    );
+    const firstLaneSentinel = await readFile(
+      join(directory, ".orch.lane-registry.initialized"),
+      "utf8"
+    );
+    expect(JSON.parse(firstRegistry)).toEqual({ schemaVersion: 1, lanes: [] });
+    expect(firstLaneSentinel).toBe("provider-lanes-v1\n");
 
     expect(await store.init()).toEqual({ store: directory });
     expect(await readFile(join(directory, "units.tsv"), "utf8")).toBe(
@@ -199,18 +211,56 @@ describe("Store", () => {
     expect(await readFile(join(directory, "ledger.tsv"), "utf8")).toBe(
       firstLedger
     );
+    expect(
+      await readFile(join(directory, "provider-lanes", "registry.json"), "utf8")
+    ).toBe(firstRegistry);
+    expect(
+      await readFile(join(directory, ".orch.lane-registry.initialized"), "utf8")
+    ).toBe(firstLaneSentinel);
     expect((await readdir(directory)).sort()).toEqual([
+      ".orch.lane-registry.initialized",
       ".orch.lock",
       "frontier.json",
       "gates.md",
       "inbox",
       "ledger.tsv",
       "preferences.md",
+      "provider-lanes",
       "units.tsv",
     ]);
 
     await store.close();
     expect(await readdir(directory)).not.toContain(".orch.lock");
+  });
+
+  it("recovers first initialization after a registry atomic-write interruption", async () => {
+    const directory = await makeDirectory();
+    const providerLanes = join(directory, "provider-lanes");
+    const interrupted = `.registry.json.${process.pid}.00000000-0000-4000-8000-000000000000.tmp`;
+    await mkdir(providerLanes);
+    await writeFile(join(providerLanes, interrupted), '{"schemaVersion":1');
+    const store = useStore(directory);
+
+    expect(await store.init()).toEqual({ store: directory });
+    expect(JSON.parse(
+      await readFile(join(providerLanes, "registry.json"), "utf8")
+    )).toEqual({ schemaVersion: 1, lanes: [] });
+    expect(await readdir(providerLanes)).toEqual(["registry.json"]);
+    expect(await store.init()).toEqual({ store: directory });
+  });
+
+  it("preserves an unrecognized registry temporary-file lookalike", async () => {
+    const directory = await makeDirectory();
+    const providerLanes = join(directory, "provider-lanes");
+    const lookalike = `.registry.json.${process.pid}.not-a-uuid.tmp`;
+    await mkdir(providerLanes);
+    await writeFile(join(providerLanes, lookalike), "unrecognized\n");
+    const store = useStore(directory);
+
+    await expect(store.init()).rejects.toThrow("orphaned provider lane artifacts");
+    expect(await readFile(join(providerLanes, lookalike), "utf8")).toBe(
+      "unrecognized\n"
+    );
   });
 
   it("composes unit add, set, get, list, and counts", async () => {
@@ -350,10 +400,181 @@ describe("Store", () => {
     expect(await readdir(directory)).not.toContain(".orch.lock");
   });
 
+  it("removes a stale legacy recovery PID file under the advisory guard", async () => {
+    const { directory, store } = await initializedStore();
+    await store.close();
+    const exited = Bun.spawn(["true"]);
+    await exited.exited;
+    await writeFile(join(directory, ".orch.lock"), `${exited.pid}\n`);
+    await writeFile(join(directory, ".orch.lock.recovery"), `${exited.pid}\n`);
+
+    const recovered = useStore(directory);
+    expect(
+      await recovered.units.add({ id: "u1", track: "build" })
+    ).toMatchObject({ id: "u1" });
+    await recovered.close();
+    expect(await readdir(directory)).not.toContain(".orch.lock");
+    expect(await readdir(directory)).not.toContain(".orch.lock.recovery");
+  });
+
+  it("releases the advisory recovery guard when its process is killed", async () => {
+    const { directory, store } = await initializedStore();
+    await store.close();
+    const exited = Bun.spawn(["true"]);
+    await exited.exited;
+    await writeFile(join(directory, ".orch.lock"), `${exited.pid}\n`);
+    const guardPath = join(directory, ".orch.lock.recovery.sqlite");
+    const holder = Bun.spawn([
+      process.execPath,
+      "-e",
+      'import { Database } from "bun:sqlite"; const database = new Database(process.argv[1], { create: true }); database.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE"); process.stdout.write("ready\\n"); await new Promise(() => {});',
+      guardPath,
+    ], { stdout: "pipe", stderr: "pipe" });
+    const recovered = useStore(directory);
+    try {
+      const reader = holder.stdout.getReader();
+      const ready = await reader.read();
+      reader.releaseLock();
+      expect(new TextDecoder().decode(ready.value)).toBe("ready\n");
+      await expect(
+        recovered.units.add({ id: "u1", track: "build" })
+      ).rejects.toThrow("store lock recovery is held");
+    } finally {
+      holder.kill("SIGKILL");
+      await holder.exited;
+    }
+
+    expect(
+      await recovered.units.add({ id: "u1", track: "build" })
+    ).toMatchObject({ id: "u1" });
+    await recovered.close();
+    expect(await readdir(directory)).not.toContain(".orch.lock");
+  });
+
+  it("keeps the new lock owner when a guard reader denies the release COMMIT", async () => {
+    const { directory, store } = await initializedStore();
+    await store.close();
+    const exited = Bun.spawn(["true"]);
+    await exited.exited;
+    await writeFile(join(directory, ".orch.lock"), `${exited.pid}\n`);
+    // The guard file is fresh, so the recovery COMMIT must write SQLite's
+    // header under an exclusive lock. This read transaction holds a shared
+    // lock for the whole recovery, which makes that COMMIT fail with
+    // SQLITE_BUSY every time rather than only when concurrent openers race.
+    const reader = new Database(join(directory, ".orch.lock.recovery.sqlite"), {
+      create: true,
+    });
+    const recovered = useStore(directory);
+    try {
+      reader.exec("BEGIN");
+      reader.query("SELECT count(*) FROM sqlite_master").get();
+      expect(
+        await recovered.units.add({ id: "u1", track: "build" })
+      ).toMatchObject({ id: "u1" });
+      expect(await readFile(join(directory, ".orch.lock"), "utf8")).toBe(
+        `${process.pid}\n`
+      );
+    } finally {
+      reader.close();
+    }
+    await recovered.close();
+    const entries = await readdir(directory);
+    expect(entries).not.toContain(".orch.lock");
+    expect(entries).toContain(".orch.lock.recovery.sqlite");
+    expect(entries).not.toContain(".orch.lock.recovery.sqlite-journal");
+  });
+
+  it("serializes simultaneous stale recovery-lock takeover into one durable lane claim", async () => {
+    const { directory, store } = await initializedStore();
+    await store.units.add({ id: "unit", track: "test" });
+    const prompt = join(directory, "prompt.md");
+    await writeFile(prompt, "review\n");
+    await store.lanes.register({
+      laneId: "review",
+      unitId: "unit",
+      parent: "codex",
+      provider: "claude",
+      model: "claude-opus-5",
+      effort: "xhigh",
+      mode: "read-only",
+      promptPath: prompt,
+      cwd: "/tmp",
+    });
+    await store.close();
+
+    const exited = Bun.spawn(["true"]);
+    await exited.exited;
+    const command = [
+      process.execPath,
+      SCRIPT,
+      "--store",
+      directory,
+      "--json",
+      "lane",
+      "tick",
+    ];
+    let durableAttemptId: string | null = null;
+    for (let round = 0; round < 8; round += 1) {
+      await writeFile(join(directory, ".orch.lock"), `${exited.pid}\n`);
+      await writeFile(join(directory, ".orch.lock.recovery"), `${exited.pid}\n`);
+      const barrier = join(directory, `tick-start-${round}`);
+      const children = Array.from({ length: 32 }, () =>
+        Bun.spawn(
+          [
+            "/bin/sh",
+            "-c",
+            'while [ ! -e "$1" ]; do :; done; shift; exec "$@"',
+            "orch-tick",
+            barrier,
+            ...command,
+          ],
+          { stdout: "pipe", stderr: "pipe" }
+        )
+      );
+      const results = children.map(async (child) => {
+        const stdout = new Response(child.stdout).text();
+        const stderr = new Response(child.stderr).text();
+        return {
+          code: await child.exited,
+          stdout: await stdout,
+          stderr: await stderr,
+        };
+      });
+      await writeFile(barrier, "go\n");
+
+      const settled = await Promise.all(results);
+      const successful = settled.filter((result) => result.code === 0);
+      expect(successful.length).toBeGreaterThan(0);
+      const attemptIds = successful.flatMap((result) =>
+        JSON.parse(result.stdout).plans.map(
+          (plan: { readonly attemptId: string }) => plan.attemptId
+        )
+      );
+      expect(attemptIds).toHaveLength(successful.length);
+      expect(new Set(attemptIds).size).toBe(1);
+      durableAttemptId ??= attemptIds[0] ?? null;
+      expect(attemptIds[0]).toBe(durableAttemptId);
+
+      const durable = JSON.parse(
+        await readFile(join(directory, "provider-lanes", "registry.json"), "utf8")
+      );
+      expect(
+        durable.lanes[0].attempts.filter(
+          (attempt: { readonly kind: string }) => attempt.kind === "claimed"
+        )
+      ).toHaveLength(1);
+      expect((await readdir(directory))).not.toContain(".orch.lock");
+      expect((await readdir(directory))).not.toContain(".orch.lock.recovery");
+      expect((await readdir(directory))).not.toContain(".orch.lock.recovery.owner");
+      expect((await readdir(directory))).toContain(".orch.lock.recovery.sqlite");
+    }
+  }, 30_000);
+
   it("blocks a writer and steals the pid lock only with force", async () => {
     const { directory, store } = await initializedStore();
     await store.close();
     await writeFile(join(directory, ".orch.lock"), `${process.pid}\n`);
+    await writeFile(join(directory, ".orch.lock.recovery"), `${process.pid}\n`);
 
     const blocked = useStore(directory);
     await expect(
@@ -529,6 +750,91 @@ describe("Store", () => {
     );
   });
 
+  it("treats a missing lane registry as corruption and preserves obligations", async () => {
+    const { directory, store } = await initializedStore();
+    await store.units.add({ id: "unit", track: "test" });
+    const prompt = join(directory, "prompt.md");
+    await writeFile(prompt, "review\n");
+    await store.lanes.register({
+      laneId: "review",
+      unitId: "unit",
+      parent: "codex",
+      provider: "claude",
+      model: "claude-opus-5",
+      effort: "xhigh",
+      mode: "read-only",
+      promptPath: prompt,
+      cwd: "/tmp",
+    });
+    const registryPath = join(directory, "provider-lanes", "registry.json");
+    await rm(registryPath);
+
+    await expect(store.lanes.check("unit")).rejects.toThrow(
+      "provider lane registry is missing"
+    );
+    await expect(
+      store.units.set({ id: "unit", state: "done" })
+    ).rejects.toThrow("provider lane registry is missing");
+    expect((await store.units.get("unit")).state).toBe("pending");
+    await expect(store.init()).rejects.toThrow(
+      "provider lane registry is missing after initialization"
+    );
+    await rm(join(directory, ".orch.lane-registry.initialized"));
+    await expect(store.init()).rejects.toThrow("orphaned provider lane artifacts");
+    expect(await readdir(join(directory, "provider-lanes", "review"))).toContain(
+      "prompt.md"
+    );
+  });
+
+  it("identifies a pre-registry store as uninitialized and repairs it with init", async () => {
+    const { directory, store } = await initializedStore();
+    await store.units.add({ id: "unit", track: "test" });
+    await rm(join(directory, "provider-lanes", "registry.json"));
+    await rm(join(directory, ".orch.lane-registry.initialized"));
+
+    await expect(store.units.set({ id: "unit", state: "done" })).rejects.toThrow(
+      "run orch init"
+    );
+
+    await store.init();
+    await store.init();
+    expect(await store.units.set({ id: "unit", state: "done" })).toMatchObject({
+      state: "done",
+    });
+  });
+
+  it("does not recreate a deleted provider-lanes subtree after initialization", async () => {
+    const { directory, store } = await initializedStore();
+    await store.units.add({ id: "unit", track: "test" });
+    const prompt = join(directory, "prompt.md");
+    await writeFile(prompt, "review\n");
+    await store.lanes.register({
+      laneId: "review",
+      unitId: "unit",
+      parent: "codex",
+      provider: "claude",
+      model: "claude-opus-5",
+      effort: "xhigh",
+      mode: "read-only",
+      promptPath: prompt,
+      cwd: "/tmp",
+    });
+    await rm(join(directory, "provider-lanes"), { recursive: true });
+
+    await expect(store.lanes.check("unit")).rejects.toThrow(
+      "provider lane registry is missing"
+    );
+    await expect(store.init()).rejects.toThrow(
+      "provider lane registry is missing after initialization"
+    );
+    await expect(
+      store.units.set({ id: "unit", state: "done" })
+    ).rejects.toThrow("provider lane registry is missing");
+    expect((await store.units.get("unit")).state).toBe("pending");
+    expect(await readdir(directory)).toContain(".orch.lane-registry.initialized");
+    await expect(readdir(join(directory, "provider-lanes"))).rejects.toThrow();
+  });
+
   it("rejects operations after close", async () => {
     const { store } = await initializedStore();
     await store.close();
@@ -575,6 +881,263 @@ describe("orch CLI", () => {
       sha: "",
       brief: "",
     });
+  });
+
+  it("drives every lane command and reports blocking ids in plain and JSON modes", async () => {
+    const directory = await makeDirectory();
+    const prompt = join(directory, "prompt.md");
+    await writeFile(prompt, "review this\n");
+    expect(runCli(["--store", directory, "init"]).code).toBe(0);
+    expect(runCli([
+      "--store", directory,
+      "unit", "add", "unit",
+      "--track", "test",
+    ]).code).toBe(0);
+
+    expect(runCli([
+      "--store", directory,
+      "lane", "check",
+      "--unit", "unit",
+    ])).toEqual({ code: 0, stdout: "READY\n", stderr: "" });
+
+    const registered = runCli([
+      "--store", directory,
+      "lane", "register", "review",
+      "--unit", "unit",
+      "--parent", "codex",
+      "--provider", "claude",
+      "--model", "claude-opus-5",
+      "--effort", "xhigh",
+      "--mode", "read-only",
+      "--prompt", prompt,
+      "--cwd", "/tmp",
+    ]);
+    expect(registered).toMatchObject({ code: 0, stdout: "review\tregistered\n", stderr: "" });
+
+    const ticked = runCli(["--store", directory, "--json", "lane", "tick"]);
+    expect(ticked.code).toBe(0);
+    const plans = JSON.parse(ticked.stdout).plans;
+    expect(plans).toHaveLength(1);
+    const plan = plans[0];
+    expect(plan.command).toBe(join(import.meta.dir, "..", "runner", "pstack-runner"));
+    expect(parseRunnerArgs(plan.argv)).toMatchObject({
+      parent: "codex",
+      provider: "claude",
+      model: "claude-opus-5",
+      effort: "xhigh",
+      mode: "read-only",
+      promptPath: join(directory, "provider-lanes", "review", "prompt.md"),
+      cwd: "/tmp",
+      outputPath: plan.outputPath,
+      receiptPath: plan.receiptPath,
+      managedAttempt: {
+        laneId: "review",
+        attemptId: plan.attemptId,
+      },
+    });
+
+    const blocked = runCli([
+      "--store", directory,
+      "lane", "check",
+      "--unit", "unit",
+    ]);
+    expect(blocked).toEqual({
+      code: 3,
+      stdout: "",
+      stderr: "BLOCKED\treview\n",
+    });
+    const blockedJson = runCli([
+      "--store", directory,
+      "--json",
+      "lane", "check",
+      "--unit", "unit",
+    ]);
+    expect(blockedJson.code).toBe(3);
+    expect(blockedJson.stderr).toBe("");
+    expect(JSON.parse(blockedJson.stdout)).toEqual({
+      unitId: "unit",
+      ready: false,
+      blockingLaneIds: ["review"],
+    });
+
+    const released = runCli([
+      "--store", directory,
+      "lane", "release", "review",
+      "--attempt", plan.attemptId,
+      "--reason", "retained pid 12 is dead",
+    ]);
+    expect(released).toMatchObject({ code: 0, stdout: "review\tinterrupted\n", stderr: "" });
+
+    const retried = runCli([
+      "--store", directory,
+      "--json",
+      "lane", "retry", "review",
+    ]);
+    expect(retried.code).toBe(0);
+    const retryPlan = JSON.parse(retried.stdout);
+    expect(retryPlan.laneId).toBe("review");
+    expect(retryPlan.attemptId).not.toBe(plan.attemptId);
+    expect(retryPlan.outputPath).not.toBe(plan.outputPath);
+
+    const unknown = runCli([
+      "--store", directory,
+      "lane", "check",
+      "--unit", "missing",
+    ]);
+    expect(unknown.code).toBe(2);
+    expect(unknown.stderr).toContain("unit missing not found");
+  });
+
+  it("reports a stalled claimed lane in plain and JSON tick output", async () => {
+    const directory = await makeDirectory();
+    const prompt = join(directory, "prompt.md");
+    const cwd = join(directory, "lane-cwd");
+    await writeFile(prompt, "review this\n");
+    await mkdir(cwd);
+    expect(runCli(["--store", directory, "init"]).code).toBe(0);
+    expect(runCli([
+      "--store", directory,
+      "unit", "add", "unit",
+      "--track", "test",
+    ]).code).toBe(0);
+    expect(runCli([
+      "--store", directory,
+      "lane", "register", "review",
+      "--unit", "unit",
+      "--parent", "codex",
+      "--provider", "claude",
+      "--model", "claude-opus-5",
+      "--effort", "xhigh",
+      "--mode", "read-only",
+      "--prompt", prompt,
+      "--cwd", cwd,
+    ]).code).toBe(0);
+    expect(JSON.parse(runCli([
+      "--store", directory,
+      "--json",
+      "lane", "tick",
+    ]).stdout).plans).toHaveLength(1);
+    await rm(cwd, { recursive: true });
+
+    const plain = runCli(["--store", directory, "lane", "tick"]);
+    expect(plain).toEqual({
+      code: 0,
+      stdout: "(no launch)\n",
+      stderr: "STALLED\treview\tlane review working directory is missing or is not a directory\n",
+    });
+
+    const json = runCli(["--store", directory, "--json", "lane", "tick"]);
+    expect(json.code).toBe(0);
+    expect(json.stderr).toBe("");
+    expect(JSON.parse(json.stdout)).toEqual({
+      plans: [],
+      stalledLanes: [{
+        laneId: "review",
+        reason: "lane review working directory is missing or is not a directory",
+      }],
+    });
+  });
+
+  it("reports terminal and partial-artifact claim barriers in plain and JSON tick output", async () => {
+    const directory = await makeDirectory();
+    const prompt = join(directory, "prompt.md");
+    await writeFile(prompt, "review this\n");
+    const store = useStore(directory);
+    await store.init();
+    for (const unit of ["terminal-unit", "partial-unit", "claude-next", "codex-next"]) {
+      await store.units.add({ id: unit, track: "test" });
+    }
+    await store.lanes.register({
+      laneId: "terminal-review",
+      unitId: "terminal-unit",
+      parent: "codex",
+      provider: "claude",
+      model: "claude-opus-5",
+      effort: "xhigh",
+      mode: "read-only",
+      promptPath: prompt,
+      cwd: "/tmp",
+    });
+    await store.lanes.register({
+      laneId: "partial-review",
+      unitId: "partial-unit",
+      parent: "claude",
+      provider: "codex",
+      model: "gpt-5.6-sol",
+      effort: "max",
+      mode: "read-only",
+      promptPath: prompt,
+      cwd: "/tmp",
+    });
+    const initial = (await store.lanes.tick()).plans;
+    expect(initial).toHaveLength(2);
+    const partial = initial.find((plan) => plan.laneId === "partial-review");
+    if (partial === undefined) throw new Error("missing partial plan");
+    await writeFile(partial.outputPath, "reserved");
+    await store.units.set({ id: "terminal-unit", state: "abandoned" });
+    await store.lanes.register({
+      laneId: "claude-next",
+      unitId: "claude-next",
+      parent: "codex",
+      provider: "claude",
+      model: "claude-opus-5",
+      effort: "xhigh",
+      mode: "read-only",
+      promptPath: prompt,
+      cwd: "/tmp",
+    });
+    await store.lanes.register({
+      laneId: "codex-next",
+      unitId: "codex-next",
+      parent: "claude",
+      provider: "codex",
+      model: "gpt-5.6-sol",
+      effort: "max",
+      mode: "read-only",
+      promptPath: prompt,
+      cwd: "/tmp",
+    });
+    await store.close();
+
+    const plain = runCli(["--store", directory, "lane", "tick"]);
+    expect(plain).toEqual({
+      code: 0,
+      stdout: "(no launch)\n",
+      stderr: [
+        "STALLED\tterminal-review\tlane terminal-review is claimed without launcher artifacts on terminal unit terminal-unit; provider claude remains occupied",
+        "STALLED\tpartial-review\tlane partial-review claim has an output artifact without a receipt artifact; provider codex remains occupied",
+        "",
+      ].join("\n"),
+    });
+
+    const json = runCli(["--store", directory, "--json", "lane", "tick"]);
+    expect(json.code).toBe(0);
+    expect(json.stderr).toBe("");
+    expect(JSON.parse(json.stdout)).toEqual({
+      plans: [],
+      stalledLanes: [
+        {
+          laneId: "terminal-review",
+          reason: "lane terminal-review is claimed without launcher artifacts on terminal unit terminal-unit; provider claude remains occupied",
+        },
+        {
+          laneId: "partial-review",
+          reason: "lane partial-review claim has an output artifact without a receipt artifact; provider codex remains occupied",
+        },
+      ],
+    });
+
+    const registry = JSON.parse(
+      await readFile(join(directory, "provider-lanes", "registry.json"), "utf8")
+    );
+    expect(registry.lanes.find(
+      (lane: { readonly spec: { readonly laneId: string } }) =>
+        lane.spec.laneId === "claude-next"
+    ).attempts.at(-1).kind).toBe("registered");
+    expect(registry.lanes.find(
+      (lane: { readonly spec: { readonly laneId: string } }) =>
+        lane.spec.laneId === "codex-next"
+    ).attempts.at(-1).kind).toBe("registered");
   });
 
   it("maps user and not-found outcomes to the preserved exit codes", async () => {

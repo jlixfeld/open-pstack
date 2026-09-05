@@ -45,6 +45,20 @@ else
   fail=1
 fi
 
+release_bad=""
+vc_re="$(printf '%s' "$vc" | sed 's/\./\\./g')"
+grep -Fq "Open Pstack $vc retains this" "$repo/UPSTREAM.md" || release_bad="${release_bad}UPSTREAM.md prose does not name Open Pstack $vc"$'\n'
+grep -Fq "Open Pstack $vc tracks pstack" "$repo/README.md" || release_bad="${release_bad}README.md does not name Open Pstack $vc"$'\n'
+grep -Fq "Version $vc is synced to Cursor pstack" "$repo/docs/reference.md" || release_bad="${release_bad}docs/reference.md does not name version $vc"$'\n'
+grep -Eq "^## ${vc_re}( |\$)" "$repo/CHANGES.md" || release_bad="${release_bad}CHANGES.md has no release section headed ## $vc"$'\n'
+if [ -n "$release_bad" ]; then
+  note "FAIL: release $vc is not named consistently outside the manifests:"
+  note "$release_bad"
+  fail=1
+else
+  note "ok: README.md, docs/reference.md, UPSTREAM.md prose, and CHANGES.md all name release $vc"
+fi
+
 setup="$repo/plugins/pstack/skills/setup-pstack/SKILL.md"
 dispatch="$repo/plugins/pstack/skills/poteto-mode/references/provider-dispatch.md"
 route_bad=""
@@ -211,6 +225,59 @@ if [ -n "$schema_bad" ]; then
   fail=1
 else
   note "ok: TypeScript schema-boundary guidance preserves inference and no-new-dependency rule"
+fi
+
+managed_lane_bad=""
+for required in \
+  'provider-paused' \
+  'Exit 75' \
+  'whether managed or unmanaged' \
+  'canonical lane fingerprint' \
+  'starts the model process at most once' \
+  'only sleep or retry is the bounded Grok authentication preflight' \
+  'Every managed ordinary or elevated retry uses the unchanged launch plan and fresh managed attempt identity returned by `orch --json lane retry`' \
+  'Call `orch --json lane retry` directly; it reconciles the prior receipt under the store lock before it claims a fresh attempt.' \
+  'never substitutes a model or provider'; do
+  if ! grep -Fq "$required" "$dispatch"; then
+    managed_lane_bad="${managed_lane_bad}provider dispatch lost managed-lane invariant: $required"$'\n'
+  fi
+done
+if grep -Fq 'Reconcile the prior receipt through `orch --json lane tick` before asking for that retry plan' "$dispatch"; then
+  managed_lane_bad="${managed_lane_bad}provider dispatch ticks before managed retry and can give the provider to a sibling"$'\n'
+fi
+orchestrate="$plugin/skills/poteto-mode/playbooks/orchestrate.md"
+for required in \
+  'orch lane register' \
+  'orch --json lane tick' \
+  'orch lane check --unit' \
+  'orch --json lane retry' \
+  'orch lane release' \
+  '30 minutes' \
+  'never a shorter one' \
+  'Duplicate wakes and session restarts' \
+  'There is no TTL or inferred timeout.' \
+  'Managed provider pauses are not ordinary `cap-hit` failures and do not count toward the two-retry policy below.' \
+  'Run the idempotent `orch init` for new and existing stores.' \
+  'After a session restart: run the idempotent `orch init` against the existing store' \
+  'Schedulers never pass the global `--force` option; forced lock theft is an operator recovery action.'; do
+  if ! grep -Fq "$required" "$orchestrate"; then
+    managed_lane_bad="${managed_lane_bad}orchestrate lost managed-lane invariant: $required"$'\n'
+  fi
+done
+for consumer in arena swarm interrogate; do
+  consumer_skill="$plugin/skills/$consumer/SKILL.md"
+  for required in 'Exit 75' 'provider-paused' 'not a dropout'; do
+    if ! grep -Fq "$required" "$consumer_skill"; then
+      managed_lane_bad="${managed_lane_bad}$consumer lost pause handling: $required"$'\n'
+    fi
+  done
+done
+if [ -n "$managed_lane_bad" ]; then
+  note "FAIL: managed provider lane contract"
+  note "$managed_lane_bad"
+  fail=1
+else
+  note "ok: managed provider lane contract"
 fi
 
 if [ "${PSTACK_STATIC_ONLY:-0}" = "1" ]; then

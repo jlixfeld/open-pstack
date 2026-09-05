@@ -1,4 +1,7 @@
 #!/usr/bin/env bun
-const startedAt = Date.now();
+const startedAt = {
+  wallTimeMs: Date.now(),
+  monotonicTimeMs: performance.now(),
+};
 const { main } = await import("./cli.ts");
 process.exitCode = await main(process.argv.slice(2), startedAt);

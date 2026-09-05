@@ -2,7 +2,25 @@
 
 This port applies the Cursor → Claude Code substitutions in skill bodies. Earlier drafts left them flagged; this revision resolves them. A later pass added a Codex build that shares the same skills; see [Codex port](#codex-port) below.
 
-## Unreleased — role-qualified tiered routing
+## 1.3.0 adds role-qualified tiered routing, durable Claude quota pauses, and Cursor upstream monitoring
+
+Managed provider lanes now persist immutable route and prompt snapshots in the
+orchestrate store. The registry has explicit registration, one-shot ticks,
+mandatory unit gates, durable Claude quota pauses with a 30-minute default,
+manual retry/release, receipt-v2 validation, output-byte digests, and no
+provider substitution. A root sentinel prevents reinitialization from erasing
+lane obligations when the provider-lanes subtree disappears. Dead recovery
+locks can be taken over without allowing routine commands to steal live locks.
+Releasing the data-free recovery guard treats a busy commit as release
+contention, so the command that just took over the lock neither fails nor
+leaves a dead `.orch.lock` behind.
+Ticks report held provider claims, first initialization recovers its own
+interrupted registry write, and identical registration repairs a missing prompt
+snapshot only from source bytes that match the stored digest. Receipt
+timestamps stay truthful in both clock directions: `completedAt`, and therefore
+a pause's `observedAt`, is the later of the observed wall time and the start
+time plus monotonic elapsed time, and receipt validation accepts a wall-clock
+span at least as long as the monotonic elapsed time. Deadlines remain monotonic.
 
 The routing manifest now lists Fable, Sol, Terra, Luna, Grok, and Opus with family-specific efforts (`ultra` for Sol and Terra only), plus an ordered role registry. The initial map separates feature implementation from refactoring. Setup has executable prepare/commit seams: it renders a deterministic preview and final-map probe plan in memory, probes outside the setup code, rechecks baselines, atomically replaces only changed targets, verifies readback, and compensates both snapshots on failure. Panels preserve every lane; Arena's cross-judge is a pool. An explicit pstack request or confirmation of the disclosed model sheet is standing authorization for every selected native or external lane to receive its assigned source code and task context. Automatic SessionStart routing is not authorization by itself. There is no fallback.
 
