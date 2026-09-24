@@ -2,11 +2,13 @@
 
 This port applies the Cursor → Claude Code substitutions in skill bodies. Earlier drafts left them flagged; this revision resolves them. A later pass added a Codex build that shares the same skills; see [Codex port](#codex-port) below.
 
-## 1.3.0-E1 identifies the OpenAI-only experiment
+## 1.4.1-E1 syncs Cursor pstack 0.15.1 into the OpenAI-only experiment
 
-E1 marks the Astra and Sol routing experiment introduced in PR #17. The package
-now has a distinct version in both plugin managers. This version-label change
-preserves the existing routing and Cursor pstack 0.14.3 sync point.
+This release tracks Cursor pstack 0.15.1 at `f8abeddd1862dc73704e3d719dd73df0d51b8c71`.
+It keeps the Astra, Sol, Terra, and Luna model matrix, parent-owned provider
+authorization, deterministic runner, Cursor monitoring, and live-evidence draft
+gate. It also imports the new premise and behavior-testing principles, skill and
+workflow edits, provenance updates, and the upstream merge-audit utilities.
 
 ## 1.3.0 adds role-qualified tiered routing, durable Claude quota pauses, and Cursor upstream monitoring
 
