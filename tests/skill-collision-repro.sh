@@ -280,6 +280,54 @@ else
   note "ok: managed provider lane contract"
 fi
 
+coverage_policy="$plugin/skills/principle-prove-it-works/references/changed-branch-coverage.md"
+coverage_bad=""
+if [ ! -f "$coverage_policy" ]; then
+  coverage_bad="${coverage_bad}missing changed-branch coverage policy"$'\n'
+else
+  for required in \
+    'CoverageReview =' \
+    'measured {' \
+    'unavailable {' \
+    'reason: no-tooling | unsupported-granularity | failed-run' \
+    'coveredChangedBranches' \
+    'totalChangedBranches' \
+    'configuredThreshold?' \
+    'behavior-test { test, protectedOutcome, failingSignal }' \
+    'unreachable | generated | platform-specific | impractical' \
+    'There is no universal percentage target.' \
+    'selective mutation testing only for high-risk logic'; do
+    if ! grep -Fq "$required" "$coverage_policy"; then
+      coverage_bad="${coverage_bad}coverage policy lost: $required"$'\n'
+    fi
+  done
+fi
+coverage_hooks=(
+  "$plugin/skills/principle-prove-it-works/SKILL.md"
+  "$plugin/skills/poteto-mode/SKILL.md"
+  "$plugin/skills/poteto-mode/playbooks/feature.md"
+  "$plugin/skills/poteto-mode/playbooks/bug-fix.md"
+  "$plugin/skills/poteto-mode/playbooks/refactoring.md"
+  "$plugin/skills/tdd/SKILL.md"
+  "$plugin/skills/poteto-mode/playbooks/opening-a-pr.md"
+  "$plugin/skills/make-pr-easy-to-review/SKILL.md"
+)
+for coverage_hook in "${coverage_hooks[@]}"; do
+  if ! grep -Fq 'changed-branch-coverage.md' "$coverage_hook"; then
+    coverage_bad="${coverage_bad}missing direct coverage hook: $coverage_hook"$'\n'
+  fi
+done
+if ! grep -Fq 'Open a draft PR until the exact candidate is installed' "$opening_pr"; then
+  coverage_bad="${coverage_bad}opening-a-pr lost the live-evidence draft gate"$'\n'
+fi
+if [ -n "$coverage_bad" ]; then
+  note "FAIL: changed branch coverage contract"
+  note "$coverage_bad"
+  fail=1
+else
+  note "ok: changed branch coverage policy and direct workflow hooks"
+fi
+
 if [ "${PSTACK_STATIC_ONLY:-0}" = "1" ]; then
   exit "$fail"
 fi

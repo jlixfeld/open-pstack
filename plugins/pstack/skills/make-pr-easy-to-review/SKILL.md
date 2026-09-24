@@ -14,6 +14,7 @@ Prepare a PR so a reviewer can quickly understand the intent, important files, a
 3. Identify reviewability issues: noisy commits, stale description, unrelated changes, mixed mechanical and logic changes, missing tests, or unclear reviewer entry points.
 4. Propose a plan before rewriting history or force-pushing.
 5. Apply safe improvements, then verify the tree or diff still matches the intended code.
+6. Inspect the [changed branch coverage review](../principle-prove-it-works/references/changed-branch-coverage.md). Make missing behavior tests, exceptions, unavailable coverage, and residual risk visible in the PR description. Reject percentage-padding tests and do not present coverage as correctness proof.
 
 ## History Cleanup
 

@@ -18,6 +18,7 @@ Do not force a test when it would be impractical. If the available test would re
 5. **Fix the bug.** Make the smallest production change that satisfies the intended behavior while preserving nearby contracts.
 6. **Rerun the regression test.** Confirm the test now passes.
 7. **Run nearby validation.** Run relevant adjacent tests, type checks, lint, or scenario checks when the change has broader risk.
+8. **Review changed branch coverage.** Complete the [changed branch coverage review](../principle-prove-it-works/references/changed-branch-coverage.md). Keep the failing-before signal and passing-after behavior proof. Inspect every changed branch gap. Add a behavior test or a justified exception.
 
 ## If a Failing Test Is Impractical
 

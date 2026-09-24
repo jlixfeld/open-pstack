@@ -23,6 +23,8 @@ Code and features:
 3. Check the full chain: does data flow from input to output?
 4. For integrations, test the full communication path end-to-end
 
+For code changes, complete the [changed branch coverage review](references/changed-branch-coverage.md). Record a measured review when existing tooling can identify changed branches. Otherwise record why coverage is unavailable and the substitute verification. Inspect every changed branch gap. Do not treat a percentage as proof that the behavior works.
+
 Delegation: trust artifacts, not self-reports.
 When verifying delegated work, inspect the actual output artifact (git diff, file contents, runtime behavior), not the delegate's summary.
 
