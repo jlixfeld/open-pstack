@@ -32,3 +32,4 @@ jobs:
         run: |
           bun -e 'for (const path of [".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json", "plugins/pstack/.claude-plugin/plugin.json", "plugins/pstack/.codex-plugin/plugin.json"]) JSON.parse(await Bun.file(path).text())'
           PSTACK_STATIC_ONLY=1 bash tests/skill-collision-repro.sh
+          bash tests/changed-branch-coverage-fixture.sh

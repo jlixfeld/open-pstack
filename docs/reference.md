@@ -2,7 +2,7 @@
 
 This page contains the full skill, dependency, runtime, and porting reference. For the plain-English introduction and quick start, see the [main README](../README.md).
 
-[Poteto](https://x.com/poteto)'s [pstack](https://github.com/cursor/plugins/tree/main/pstack), adapted to run in Claude Code and Codex without Cursor. One shared skill tree serves both harnesses. The experimental active matrix contains OpenAI Astra, Sol, Terra, and Luna; the runner retains dormant legacy provider acceptance for existing immutable lanes and receipts. Version 1.3.0-E1 is synced to Cursor pstack v0.14.3 at `bdf7aa355337897f167153e05069aca505dae17c`. See [UPSTREAM.md](../UPSTREAM.md) for the exact sync contract.
+[Poteto](https://x.com/poteto)'s [pstack](https://github.com/cursor/plugins/tree/main/pstack), adapted to run in Claude Code and Codex without Cursor. One shared skill tree serves both harnesses. The experimental active matrix contains OpenAI Astra, Sol, Terra, and Luna; the runner retains dormant legacy provider acceptance for existing immutable lanes and receipts. Version 1.4.1-E1 is synced to Cursor pstack v0.15.1 at `f8abeddd1862dc73704e3d719dd73df0d51b8c71`. See [UPSTREAM.md](../UPSTREAM.md) for the exact sync contract.
 
 Original by Lauren Tan. This distribution builds on Michael Denyer's [pstack-claude](https://github.com/michael-denyer/pstack-claude) port and retains its history and MIT attribution. It imports seven MIT-licensed skills from [cursor-team-kit](https://github.com/cursor/plugins/tree/main/cursor-team-kit): `deslop`, `thermo-nuclear-code-quality-review`, `make-pr-easy-to-review`, `fix-ci`, `fix-merge-conflicts`, `get-pr-comments`, `what-did-i-get-done`.
 
