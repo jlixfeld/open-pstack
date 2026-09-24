@@ -8,6 +8,10 @@ trap 'rm -rf "$scratch"' EXIT
 for fixture in hook policy; do
   copy="$scratch/$fixture"
   cp -R "$repo" "$copy"
+  if ! PSTACK_STATIC_ONLY=1 "$copy/tests/skill-collision-repro.sh" >/dev/null 2>&1; then
+    printf 'intact static baseline failed before coverage mutation\n' >&2
+    exit 1
+  fi
   if [ "$fixture" = hook ]; then
     target="$copy/plugins/pstack/skills/tdd/SKILL.md"
     pattern='changed-branch-coverage\.md'

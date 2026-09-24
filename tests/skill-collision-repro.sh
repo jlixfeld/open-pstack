@@ -328,6 +328,65 @@ else
   note "ok: changed branch coverage policy and direct workflow hooks"
 fi
 
+how_skill="$plugin/skills/how/SKILL.md"
+how_critic_prompt="$plugin/skills/how/references/critic-prompt.md"
+how_critique_rubric="$plugin/skills/how/references/critique-rubric.md"
+how_critique_bad=""
+if grep -Fq '## Critique Mode' "$how_skill" || grep -Fq 'how critics:' "$setup"; then
+  if [ ! -f "$how_critic_prompt" ]; then
+    how_critique_bad="${how_critique_bad}Critique Mode has no critic prompt"$'\n'
+  fi
+  if [ ! -f "$how_critique_rubric" ]; then
+    how_critique_bad="${how_critique_bad}Critique Mode has no critique rubric"$'\n'
+  fi
+  if ! grep -Fq 'references/critic-prompt.md' "$how_skill"; then
+    how_critique_bad="${how_critique_bad}Critique Mode does not bind the critic prompt"$'\n'
+  fi
+  if ! grep -Fq 'references/critique-rubric.md' "$how_skill"; then
+    how_critique_bad="${how_critique_bad}Critique Mode does not bind the critique rubric"$'\n'
+  fi
+fi
+if [ -n "$how_critique_bad" ]; then
+  note "FAIL: how critique references"
+  note "$how_critique_bad"
+  fail=1
+else
+  note "ok: how critique references match the configured mode"
+fi
+
+eval_case="$plugin/evals/changed-branch-coverage/case.yaml"
+eval_rubric="$plugin/evals/changed-branch-coverage/graders/rubric.md"
+eval_bad=""
+for required in 'uncovered' 'mock-only' 'no coverage tool' 'caller-visible' 'unavailable' 'no-tooling'; do
+  if ! grep -Fqi "$required" "$eval_case" "$eval_rubric"; then
+    eval_bad="${eval_bad}coverage eval lost: $required"$'\n'
+  fi
+done
+if [ -n "$eval_bad" ]; then
+  note "FAIL: changed branch coverage eval fixtures"
+  note "$eval_bad"
+  fail=1
+else
+  note "ok: changed branch coverage eval fixtures"
+fi
+
+ready_before_proof_bad=""
+for ready_caller in "$plugin/skills/poteto-mode/playbooks/autopilot-full.md" "$plugin/skills/poteto-mode/playbooks/autopilot-stack.md" "$plugin/skills/poteto-mode/playbooks/multi-phase-plan.md"; do
+  if grep -Eqi 'ready PR|ready, never draft|ready by default' "$ready_caller"; then
+    ready_before_proof_bad="${ready_before_proof_bad}ready before proof: $ready_caller"$'\n'
+  fi
+  if ! grep -Fqi 'draft until' "$ready_caller"; then
+    ready_before_proof_bad="${ready_before_proof_bad}missing draft-until-proof rule: $ready_caller"$'\n'
+  fi
+done
+if [ -n "$ready_before_proof_bad" ]; then
+  note "FAIL: callers bypass the live-evidence draft gate"
+  note "$ready_before_proof_bad"
+  fail=1
+else
+  note "ok: callers retain the live-evidence draft gate"
+fi
+
 if [ "${PSTACK_STATIC_ONLY:-0}" = "1" ]; then
   exit "$fail"
 fi

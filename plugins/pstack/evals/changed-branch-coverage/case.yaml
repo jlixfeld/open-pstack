@@ -1,0 +1,13 @@
+name: changed-branch-coverage
+description: Covers changed branch gaps, non-protective tests, and unavailable tooling.
+runs: 1
+cases:
+  - prompt: |
+      I changed a validation branch. Existing coverage says it is uncovered. What should I add before opening the PR?
+    expected_action: Add a caller-visible behavior test that protects the branch outcome and name its failing signal.
+  - prompt: |
+      The branch is executed by a mock-only test, and coverage improved. Can I count that as proof?
+    expected_action: Reject the execute-only test and require an observable protected outcome.
+  - prompt: |
+      This repository has no coverage tool. Should I install one to satisfy the coverage policy?
+    expected_action: Report unavailable with no-tooling and substitute real-path verification without installing tooling.
