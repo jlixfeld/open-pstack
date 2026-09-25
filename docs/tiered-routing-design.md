@@ -13,30 +13,30 @@ The operator runs `setup-pstack` from Claude Code or Codex. Setup loads the acti
 The first-run role map is:
 
 ```text
-feature implementation: codex:gpt-6-sol@high
-refactoring implementation: codex:gpt-6-luna@high
+feature implementation: codex:gpt-5.6-terra@high
+refactoring implementation: codex:gpt-5.6-luna@high
 bug-fix: codex:gpt-6-astra@medium
 perf-issue: codex:gpt-6-astra@high
 hillclimb: codex:gpt-6-astra@high
 judgment and prose: codex:gpt-6-astra@medium
 hardest tasks: codex:gpt-6-astra@xhigh
-how explorer: codex:gpt-6-luna@medium
+how explorer: codex:gpt-5.6-luna@medium
 how explainer: codex:gpt-6-astra@medium
-how critics: codex:gpt-6-astra@medium, codex:gpt-6-sol@medium
+how critics: codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium
 why investigators, synthesizer: inherit-parent
 reflect tooling, judgment, divergent, synthesizer: inherit-parent
-arena runners: codex:gpt-6-astra@medium, codex:gpt-6-sol@medium
-arena cross-judge pool: codex:gpt-6-astra@medium, codex:gpt-6-sol@medium
-swarm workers: codex:gpt-6-luna@high
-architect runners: codex:gpt-6-astra@high, codex:gpt-6-sol@high
-interrogate reviewers: codex:gpt-6-astra@medium, codex:gpt-6-sol@medium
+arena runners: codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium
+arena cross-judge pool: codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium
+swarm workers: codex:gpt-5.6-luna@high
+architect runners: codex:gpt-6-astra@high, codex:gpt-5.6-sol@high
+interrogate reviewers: codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium
 ```
 
 The local upstream command fetches `cursor/plugins` and reports changes between the recorded Cursor commit and the current default branch, restricted to `pstack/`. The weekly workflow runs the same comparison and reconciles one marker-owned issue in this fork.
 
 ## Shape
 
-`provider-dispatch.md` remains the human and machine-readable routing manifest. Its active capability table defines GPT-6 Astra, Sol, and Luna. Every active family supports the portable `low` through `max` range; pstack does not expose Sol and Luna's `none` effort, and no active family accepts `ultra`. The runner retains dormant Claude and Grok acceptance for existing immutable lanes and receipts, including Claude Opus 5.5, without making those families active selections.
+`provider-dispatch.md` remains the human and machine-readable routing manifest. Its active capability table defines Astra, Sol, Terra, and Luna. Astra supports the portable documented `low` through `max` range; no `ultra` is selected until the CLI verifies it. Sol and Terra accept `ultra`, and Luna accepts through `max`. The runner retains dormant legacy provider acceptance for existing immutable lanes and receipts without making those families active selections.
 
 The manifest also owns the ordered role registry and first-run lanes. A role has one of three shapes:
 
@@ -52,7 +52,7 @@ The setup implementation exposes a real two-phase boundary:
 2. The parent runs each probe with its native or external route, shows every role, lane, effort, and route, then asks for confirmation.
 3. `commit` rechecks both target baselines. If either target changed after `prepare`, it aborts without writing. Otherwise it atomically replaces changed files, reads both back, and restores every original snapshot after any write or readback failure. A target that did not exist before the transaction is removed during rollback.
 
-The active descriptors are Codex-native under a Codex parent and external under a Claude parent. `inherit-parent` and `auto` always use the parent-native route, so OpenAI-only execution needs a Codex OpenAI parent. Dormant legacy routes retain their existing runtime behavior. The route resolver has no fallback branch.
+The experimental active descriptors are Codex-native under a Codex parent and external under a Claude parent. `inherit-parent` and `auto` always use the parent-native route, so OpenAI-only execution needs a Codex OpenAI parent. Dormant legacy routes retain their existing runtime behavior. The route resolver has no fallback branch.
 
 The upstream monitor has two pure decisions behind thin command adapters. The comparison classifies the recorded Cursor tree, the Cursor head tree, and mapped local blobs. It reports net-zero changes, diverged history, changed `pstack/` paths, and paths that overlap fork-specific files. The issue decision supports create, update, reopen, close, and no-op transitions for one stable marker. Multiple marker-owned issues fail closed.
 
@@ -84,7 +84,7 @@ plugins/pstack/skills/poteto-mode/scripts/
 
 ## Synthesis decision
 
-The original Terra candidate was the base because it put the role map at the center and kept the implementation small enough for one reviewable change. The original Sol candidate contributed the canonical Markdown manifest, family-specific effort support, the `pool` role shape, the real prepare and commit boundary, the stale-baseline check, and blob-based issue reconciliation. The current map replaces those retired GPT-5.6 lanes with their GPT-6 task-tier equivalents.
+The Terra candidate is the base because it puts the role map at the center and keeps the implementation small enough for one reviewable change. The Sol candidate contributed the canonical Markdown manifest, family-specific `ultra` support, the `pool` role shape, the real prepare and commit boundary, the stale-baseline check, and blob-based issue reconciliation.
 
 The design uses one short-lived private plan to bind preview, probes, and commit. It rejects long-lived proof bundles, a filesystem journal, crash-recovery state, and a broad branded wire taxonomy. Those mechanisms add a second subsystem without improving the requested probe-failure and rollback guarantees. Probe outputs and receipts remain evidence, not active setup state.
 

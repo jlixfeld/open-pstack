@@ -35,7 +35,7 @@ const MATRIX_HEADER = [
   "Claude-native agent stem",
 ] as const;
 
-const FAMILY_ORDER = ["astra", "sol", "luna"] as const;
+const FAMILY_ORDER = ["astra", "sol", "terra", "luna"] as const;
 const PROVIDERS = ["claude", "codex", "grok"] as const;
 const DESCRIPTOR_RE =
   /(claude|codex|grok):[a-z0-9.-]+@(low|medium|high|xhigh|max|ultra)/g;
@@ -123,9 +123,9 @@ function parseModelMatrix(markdown: string): MatrixRow[] {
     .slice(start + 1, end)
     .map((line) => line.trim())
     .filter((line) => line.startsWith("|"));
-  if (table.length !== 5) {
+  if (table.length !== 6) {
     throw new Error(
-      `model matrix must be header, separator, and 3 data rows, got ${table.length}`
+      `model matrix must be header, separator, and 4 data rows, got ${table.length}`
     );
   }
   const header = splitRow(table[0]);
@@ -229,7 +229,8 @@ describe("model matrix", () => {
     ).toEqual([
       ["astra", "medium"],
       ["sol", "medium"],
-      ["luna", "medium"],
+      ["terra", "high"],
+      ["luna", "high"],
     ]);
     expect(rows.find((row) => row.family === "astra")?.model).toBe("gpt-6-astra");
     const documentedEfforts = rows.map((row) => [
@@ -242,7 +243,6 @@ describe("model matrix", () => {
     expect(JSON.stringify(documentedEfforts)).toBe(JSON.stringify(activeRunnerEfforts));
     expect(MODEL_EFFORTS["claude:claude-fable-5-1"]).toBeDefined();
     expect(MODEL_EFFORTS["claude:claude-opus-5"]).toBeDefined();
-    expect(MODEL_EFFORTS["claude:claude-opus-5-5"]).toBeDefined();
     expect(MODEL_EFFORTS["grok:grok-4.6"]).toBeDefined();
   });
 
@@ -314,11 +314,11 @@ describe("model matrix", () => {
       expect(row.selectableEfforts).toContain(asEffort(effort));
     }
     const expectedPanels = new Map([
-      ["how critics", "codex:gpt-6-astra@medium, codex:gpt-6-sol@medium"],
-      ["arena runners", "codex:gpt-6-astra@medium, codex:gpt-6-sol@medium"],
-      ["arena cross-judge pool", "codex:gpt-6-astra@medium, codex:gpt-6-sol@medium"],
-      ["architect runners", "codex:gpt-6-astra@high, codex:gpt-6-sol@high"],
-      ["interrogate reviewers", "codex:gpt-6-astra@medium, codex:gpt-6-sol@medium"],
+      ["how critics", "codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium"],
+      ["arena runners", "codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium"],
+      ["arena cross-judge pool", "codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium"],
+      ["architect runners", "codex:gpt-6-astra@high, codex:gpt-5.6-sol@high"],
+      ["interrogate reviewers", "codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium"],
     ]);
     for (const role of PANEL_ROLES) {
       const line = sheet

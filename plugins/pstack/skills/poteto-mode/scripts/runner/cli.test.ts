@@ -97,22 +97,6 @@ describe("runner CLI parsing", () => {
     );
   });
 
-  it("accepts the GPT-6 family and dormant Claude Opus 5.5 lanes", () => {
-    for (const model of ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
-      expect(parseArgs(argv(["--model", model, "--effort", "high"]))?.model).toBe(model);
-    }
-    expect(parseArgs(argv([
-      "--parent", "codex",
-      "--provider", "claude",
-      "--model", "claude-opus-5-5",
-      "--effort", "medium",
-    ]))).toMatchObject({
-      provider: "claude",
-      model: "claude-opus-5-5",
-      effort: "medium",
-    });
-  });
-
   it("rejects unsupported provider, model, and family effort combinations", () => {
     expect(() => parseArgs(argv(["--model", "gpt-6-astra", "--effort", "ultra"]))).toThrow(
       "unsupported model or effort: codex:gpt-6-astra@ultra"
