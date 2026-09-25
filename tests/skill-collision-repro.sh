@@ -62,11 +62,11 @@ fi
 setup="$repo/plugins/pstack/skills/setup-pstack/SKILL.md"
 dispatch="$repo/plugins/pstack/skills/poteto-mode/references/provider-dispatch.md"
 route_bad=""
-grep -Fq '| feature implementation | single | codex:gpt-5.6-terra@high |' "$dispatch" || route_bad="missing Terra feature role"$'\n'
-grep -Fq '| refactoring implementation | single | codex:gpt-5.6-luna@high |' "$dispatch" || route_bad="missing Luna refactoring role"$'\n'
+grep -Fq '| feature implementation | single | codex:gpt-6-sol@high |' "$dispatch" || route_bad="missing GPT-6 Sol feature role"$'\n'
+grep -Fq '| refactoring implementation | single | codex:gpt-6-luna@high |' "$dispatch" || route_bad="missing GPT-6 Luna refactoring role"$'\n'
 grep -Fq '| arena cross-judge pool | pool |' "$dispatch" || route_bad="cross-judge is not a pool"$'\n'
-grep -Fq 'feature implementation: codex:gpt-5.6-terra@high' "$setup" || route_bad="setup misses split feature role"$'\n'
-grep -Fq 'refactoring implementation: codex:gpt-5.6-luna@high' "$setup" || route_bad="setup misses split refactoring role"$'\n'
+grep -Fq 'feature implementation: codex:gpt-6-sol@high' "$setup" || route_bad="setup misses split feature role"$'\n'
+grep -Fq 'refactoring implementation: codex:gpt-6-luna@high' "$setup" || route_bad="setup misses split refactoring role"$'\n'
 if [ -n "$route_bad" ]; then
   note "FAIL: the routing registry and setup example drifted:"
   note "$route_bad"
