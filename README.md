@@ -80,7 +80,7 @@ In Codex, ask:
 Use pstack:setup-pstack to configure pstack.
 ```
 
-Setup checks the exact final role descriptors you can run, shows every parent-specific route, and asks before saving. The experimental initial map separates feature implementation (GPT-5.6 Terra) from refactoring (GPT-5.6 Luna), uses GPT-6 Astra at medium effort for bug work, broad judgment, and independent review, reserves high effort for coupled performance and hillclimb work, and pairs Astra with Sol at medium effort for Arena, How critique, and Interrogate.
+Setup checks the exact final role descriptors you can run, shows every parent-specific route, and asks before saving. The initial map separates feature implementation (GPT-6 Sol) from refactoring (GPT-6 Luna), uses GPT-6 Astra at medium effort for bug work, broad judgment, and independent review, reserves high effort for coupled performance and hillclimb work, and pairs Astra with Sol at medium effort for Arena, How critique, and Interrogate.
 
 ### 2. Use poteto-mode
 
@@ -122,7 +122,7 @@ Plugin skills include `pstack:` in their name. In Claude Code, invoke a native s
 
 Some pstack workflows use one model. Arena, Architect, Interrogate, and How critique run every configured OpenAI lane. Their list length sets the candidate or reviewer count, and consensus only applies when multiple completed lanes independently agree. Each model run uses the subscription and token allowance of its command-line tool.
 
-`setup-pstack` lets you assign an exact provider/model/effort descriptor to each role and preserve ordered panel lanes. This experimental active map uses OpenAI models. Codex runs them natively; Claude Code runs them through the Codex command-line tool. `inherit-parent` and `auto` remain native, so OpenAI-only execution requires a Codex OpenAI parent. An explicit pstack request or confirmation of the disclosed model sheet authorizes the selected lanes to receive the assigned source code and task context. Open Pstack does not quietly replace a failed model with a weaker one.
+`setup-pstack` lets you assign an exact provider/model/effort descriptor to each role and preserve ordered panel lanes. The active map uses GPT-6 Astra, Sol, and Luna. Codex runs them natively; Claude Code runs them through the Codex command-line tool. `inherit-parent` and `auto` remain native, so OpenAI-only execution requires a Codex OpenAI parent. An explicit pstack request or confirmation of the disclosed model sheet authorizes the selected lanes to receive the assigned source code and task context. Open Pstack does not quietly replace a failed model with a weaker one.
 
 ## Claude Code and Codex
 
@@ -131,7 +131,7 @@ Both apps read the same pstack skills. Only the way they start those skills and 
 | | Claude Code | Codex |
 | --- | --- | --- |
 | Start poteto-mode | Claude loads a small startup instruction that can route non-trivial work into it. You can also run `/pstack:poteto-mode` yourself. | Ask for `pstack:poteto-mode` by name. Codex does not load the Claude startup instruction. |
-| Runs inside the app | Claude runs parent-native aliases; active OpenAI descriptors use the Codex CLI. | Codex descriptors (Astra, Sol, Terra, and Luna) stay inside Codex. |
+| Runs inside the app | Claude runs parent-native aliases; active GPT-6 descriptors use the Codex CLI. | GPT-6 descriptors (Astra, Sol, and Luna) stay inside Codex. |
 | Other models | Immutable legacy lanes remain supported by their existing runner paths. | Immutable legacy lanes remain supported by their existing runner paths. |
 | Skills and workflows | Shared with Codex. | Shared with Claude Code. |
 
@@ -151,7 +151,7 @@ This repository also keeps:
 
 ## Staying close to Lauren's pstack
 
-Open Pstack 1.4.2-E1 tracks pstack 0.15.1 at Cursor commit [`f8abeddd1862dc73704e3d719dd73df0d51b8c71`](https://github.com/cursor/plugins/commit/f8abeddd1862dc73704e3d719dd73df0d51b8c71). E1 identifies the OpenAI-only routing experiment.
+Open Pstack 1.5.0 tracks pstack 0.15.1 at Cursor commit [`f8abeddd1862dc73704e3d719dd73df0d51b8c71`](https://github.com/cursor/plugins/commit/f8abeddd1862dc73704e3d719dd73df0d51b8c71).
 
 The two projects have separate version numbers. The pstack version identifies Lauren's upstream content. The Open Pstack version identifies the Claude Code and Codex package built from it.
 

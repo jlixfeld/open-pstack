@@ -2,14 +2,18 @@
 
 This port applies the Cursor → Claude Code substitutions in skill bodies. Earlier drafts left them flagged; this revision resolves them. A later pass added a Codex build that shares the same skills; see [Codex port](#codex-port) below.
 
-## 1.4.2-E1 recognizes Claude Opus 5.5 runner lanes
+## 1.5.0 routes active work through the GPT-6 family
 
-The external runner accepts the supported `claude-opus-5-5` identifier at
-`low` through `max` effort for immutable Claude lanes and receipts. Claude
-Opus 5.5 is not added to the active OpenAI-only setup matrix and no native
-Claude agents are shipped. Live Codex probes confirmed that GPT-6 Sol and Luna
-are unavailable to ChatGPT-authenticated Codex, so the proven Astra plus
-GPT-5.6 task map remains unchanged.
+The active setup matrix now uses GPT-6 Astra, Sol, and Luna. Sol high owns
+feature implementation, Luna owns refactoring, exploration, and swarm work,
+and Astra remains the judgment-heavy choice for bug fixes, performance,
+architecture, review, and the hardest tasks. Arena, How critics, Architect,
+and Interrogate pair Astra with Sol at role-appropriate efforts.
+
+Retired GPT-5.6 families are no longer selectable in a new model sheet. The
+external runner recognizes `claude-opus-5-5` for immutable Claude lanes and
+receipts, but Claude is not part of the active task map and no Claude-native
+agents are shipped.
 
 ## 1.4.1-E1 syncs Cursor pstack 0.15.1 into the OpenAI-only experiment
 

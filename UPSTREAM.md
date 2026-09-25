@@ -10,9 +10,9 @@ open-pstack tracks [Cursor's pstack](https://github.com/cursor/plugins/tree/main
 | Path | `pstack/` |
 | Commit | `f8abeddd1862dc73704e3d719dd73df0d51b8c71` |
 | Upstream version | `0.15.1` |
-| open-pstack version | `1.4.2-E1` |
+| open-pstack version | `1.5.0` |
 
-The table above is the current Cursor sync point. Open Pstack 1.4.2-E1 retains this 0.15.1 sync and the OpenAI-only experimental matrix. `README-UPSTREAM.md` preserves its pstack README verbatim. `CHANGES.md` and `NOTICE.md` describe the adaptations and provenance.
+The table above is the current Cursor sync point. Open Pstack 1.5.0 retains this 0.15.1 sync and routes active work through GPT-6 Astra, Sol, and Luna. `README-UPSTREAM.md` preserves its pstack README verbatim. `CHANGES.md` and `NOTICE.md` describe the adaptations and provenance.
 
 ## Monitor baseline facts
 
