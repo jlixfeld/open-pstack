@@ -36,7 +36,7 @@ class FakeFilesystem implements SetupFilesystem {
 }
 
 function prepared(parent: "claude" | "codex" = "codex") {
-  const fs = new FakeFilesystem([{ path: "sheet", text: "feature, refactoring: codex:gpt-5.6-terra@high\n" }, { path: "integration", text: "old\n" }]);
+  const fs = new FakeFilesystem([{ path: "sheet", text: "feature, refactoring: codex:gpt-6-sol@high\n" }, { path: "integration", text: "old\n" }]);
   return {
     fs,
     value: prepareSetup({
@@ -91,7 +91,7 @@ describe("prepare setup", () => {
 
   it("renders a deterministic full preview and derives probes only from the final map", () => {
     const { value } = prepared();
-    expect(value.preview[0]).toBe("feature implementation [1]: codex:gpt-5.6-terra@high (native)");
+    expect(value.preview[0]).toBe("feature implementation [1]: codex:gpt-6-sol@high (native)");
     expect(value.preview.some((line) => line.includes("arena cross-judge pool [1]"))).toBe(true);
     expect(value.probes.map((probe) => `${probe.provider}:${probe.model}@${probe.effort}`)).toContain("codex:gpt-6-astra@xhigh");
     expect(value.targets[0].nextBytes).not.toEqual(value.targets[0].bytes);
@@ -134,7 +134,7 @@ describe("prepare setup", () => {
   it("removes newly created targets while restoring existing targets after failures", () => {
     for (const initial of [
       [{ path: "integration", text: "old\n" }],
-      [{ path: "sheet", text: "feature implementation: codex:gpt-5.6-terra@high\n" }],
+      [{ path: "sheet", text: "feature implementation: codex:gpt-6-sol@high\n" }],
     ]) {
       const fs = new FakeFilesystem(initial);
       const value = prepareSetup({

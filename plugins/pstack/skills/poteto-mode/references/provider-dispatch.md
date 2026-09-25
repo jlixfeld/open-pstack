@@ -11,11 +11,10 @@ pstack model choices are provider-qualified descriptors:
 | Family | Upstream pstack choice | Provider | Model | Default effort | Selectable efforts | Claude-native agent stem |
 |---|---|---|---|---|---|---|
 | astra | gpt-6-astra-high | codex | gpt-6-astra | medium | low medium high xhigh max | - |
-| sol | gpt-5.6-sol-high | codex | gpt-5.6-sol | medium | low medium high xhigh max ultra | - |
-| terra | gpt-5.6-terra-high | codex | gpt-5.6-terra | high | low medium high xhigh max ultra | - |
-| luna | gpt-5.6-luna-high | codex | gpt-5.6-luna | high | low medium high xhigh max | - |
+| sol | gpt-6-sol-high | codex | gpt-6-sol | medium | low medium high xhigh max | - |
+| luna | gpt-6-luna-high | codex | gpt-6-luna | medium | low medium high xhigh max | - |
 
-This experimental active matrix routes work only to OpenAI models. Astra's portable documented set is `low`, `medium`, `high`, `xhigh`, and `max`; do not select `ultra` until the actual CLI verifies it. Sol and Terra retain `ultra` support, and Luna stops at `max`. The runner retains its dormant Claude and Grok acceptance for immutable existing lanes and receipt parsing; those families are not selectable through this active matrix. A Claude-native agent stem of `-` means no native agent is shipped.
+The active matrix routes work only to the GPT-6 family. Every active family supports `low`, `medium`, `high`, `xhigh`, and `max`; GPT-6 Sol and Luna also support `none`, but pstack does not expose a no-reasoning lane. `ultra` is not a supported effort for these families. The runner retains dormant Claude and Grok acceptance for immutable existing lanes and receipt parsing, including Claude Opus 5.5; those families are not selectable through this active matrix. A Claude-native agent stem of `-` means no native agent is shipped.
 
 Use `medium` for broad work and independent review. Select `high` explicitly for coupled retry, persisted state, authentication, or concurrency work. Use `xhigh` for the hardest tasks. `max` is an explicit operator choice; no first-run lane selects `max` or `ultra`. The map does not dynamically raise effort. See the [Astra effort experiment](../../../../../docs/astra-effort-experiment.md) for the recorded evidence.
 
@@ -27,25 +26,25 @@ one lane. A `panel` launches every stored lane in order, including repeats. A
 
 | Role | Shape | First-run lanes |
 | --- | --- | --- |
-| feature implementation | single | codex:gpt-5.6-terra@high |
-| refactoring implementation | single | codex:gpt-5.6-luna@high |
+| feature implementation | single | codex:gpt-6-sol@high |
+| refactoring implementation | single | codex:gpt-6-luna@high |
 | bug-fix | single | codex:gpt-6-astra@medium |
 | perf-issue | single | codex:gpt-6-astra@high |
 | hillclimb | single | codex:gpt-6-astra@high |
 | judgment and prose | single | codex:gpt-6-astra@medium |
 | hardest tasks | single | codex:gpt-6-astra@xhigh |
-| how explorer | single | codex:gpt-5.6-luna@medium |
+| how explorer | single | codex:gpt-6-luna@medium |
 | how explainer | single | codex:gpt-6-astra@medium |
-| how critics | panel | codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium |
+| how critics | panel | codex:gpt-6-astra@medium, codex:gpt-6-sol@medium |
 | why investigators, synthesizer | panel | inherit-parent |
 | reflect tooling, judgment, divergent, synthesizer | panel | inherit-parent |
-| arena runners | panel | codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium |
-| arena cross-judge pool | pool | codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium |
-| swarm workers | single | codex:gpt-5.6-luna@high |
-| architect runners | panel | codex:gpt-6-astra@high, codex:gpt-5.6-sol@high |
-| interrogate reviewers | panel | codex:gpt-6-astra@medium, codex:gpt-5.6-sol@medium |
+| arena runners | panel | codex:gpt-6-astra@medium, codex:gpt-6-sol@medium |
+| arena cross-judge pool | pool | codex:gpt-6-astra@medium, codex:gpt-6-sol@medium |
+| swarm workers | single | codex:gpt-6-luna@high |
+| architect runners | panel | codex:gpt-6-astra@high, codex:gpt-6-sol@high |
+| interrogate reviewers | panel | codex:gpt-6-astra@medium, codex:gpt-6-sol@medium |
 
-Arena, Architect, How critics, and Interrogate run their stored Astra and Sol lanes independently and in order. Their judge pool chooses a model different from the likely base when possible. Panel list length is the only reviewer or candidate count; do not silently deduplicate, add, or omit lanes. Consensus applies only when multiple completed lanes independently agree. Specialized single roles still use Terra or Luna where their lower-cost profile fits the work.
+Arena, Architect, How critics, and Interrogate run their stored Astra and Sol lanes independently and in order. Their judge pool chooses a model different from the likely base when possible. Panel list length is the only reviewer or candidate count; do not silently deduplicate, add, or omit lanes. Consensus applies only when multiple completed lanes independently agree. Feature implementation uses Sol, while refactoring, exploration, and swarm work use Luna where its throughput profile fits the work.
 
 ## Authorization boundary
 
@@ -64,7 +63,7 @@ The top-level harness resolves the route once. A child receives an assigned prov
 | Claude Code | native `Agent` | external runner | external runner |
 | Codex | external runner | native `spawn_agent` | external runner |
 
-`inherit-parent` and `auto` remain aliases. They use the parent's current model and effort through its native subagent primitive. In a panel they still consume one lane. Under a Claude parent that may be non-OpenAI; this experiment requires a Codex OpenAI parent for OpenAI-only execution. The route resolver has no fallback branch.
+`inherit-parent` and `auto` remain aliases. They use the parent's current model and effort through its native subagent primitive. In a panel they still consume one lane. Under a Claude parent that may be non-OpenAI; OpenAI-only execution requires a Codex OpenAI parent. The route resolver has no fallback branch.
 
 ## Native lanes
 
