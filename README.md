@@ -151,7 +151,7 @@ This repository also keeps:
 
 ## Staying close to Lauren's pstack
 
-Open Pstack 1.4.1-E1 tracks pstack 0.15.1 at Cursor commit [`f8abeddd1862dc73704e3d719dd73df0d51b8c71`](https://github.com/cursor/plugins/commit/f8abeddd1862dc73704e3d719dd73df0d51b8c71). E1 identifies the OpenAI-only routing experiment.
+Open Pstack 1.4.2-E1 tracks pstack 0.15.1 at Cursor commit [`f8abeddd1862dc73704e3d719dd73df0d51b8c71`](https://github.com/cursor/plugins/commit/f8abeddd1862dc73704e3d719dd73df0d51b8c71). E1 identifies the OpenAI-only routing experiment.
 
 The two projects have separate version numbers. The pstack version identifies Lauren's upstream content. The Open Pstack version identifies the Claude Code and Codex package built from it.
 

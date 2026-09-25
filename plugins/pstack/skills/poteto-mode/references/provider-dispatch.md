@@ -15,7 +15,7 @@ pstack model choices are provider-qualified descriptors:
 | terra | gpt-5.6-terra-high | codex | gpt-5.6-terra | high | low medium high xhigh max ultra | - |
 | luna | gpt-5.6-luna-high | codex | gpt-5.6-luna | high | low medium high xhigh max | - |
 
-This experimental active matrix routes work only to OpenAI models. Astra's portable documented set is `low`, `medium`, `high`, `xhigh`, and `max`; do not select `ultra` until the actual CLI verifies it. Sol and Terra retain `ultra` support, and Luna stops at `max`. The runner retains its dormant Claude and Grok acceptance for immutable existing lanes and receipt parsing; those families are not selectable through this active matrix. A Claude-native agent stem of `-` means no native agent is shipped.
+This experimental active matrix routes work only to OpenAI models. Astra's portable documented set is `low`, `medium`, `high`, `xhigh`, and `max`; do not select `ultra` until the actual CLI verifies it. Sol and Terra retain `ultra` support, and Luna stops at `max`. The runner retains its dormant Claude and Grok acceptance for immutable existing lanes and receipt parsing, including `claude-opus-5-5`; those families are not selectable through this active matrix. A Claude-native agent stem of `-` means no native agent is shipped.
 
 Use `medium` for broad work and independent review. Select `high` explicitly for coupled retry, persisted state, authentication, or concurrency work. Use `xhigh` for the hardest tasks. `max` is an explicit operator choice; no first-run lane selects `max` or `ultra`. The map does not dynamically raise effort. See the [Astra effort experiment](../../../../../docs/astra-effort-experiment.md) for the recorded evidence.
 

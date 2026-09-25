@@ -5,6 +5,7 @@ export const ACCESS_MODES = ["read-only", "isolated-write"] as const;
 
 export const MODEL_EFFORTS = {
   "codex:gpt-6-astra": ["low", "medium", "high", "xhigh", "max"],
+  "claude:claude-opus-5-5": ["low", "medium", "high", "xhigh", "max"],
   "claude:claude-fable-5-1": ["low", "medium", "high", "xhigh", "max"],
   "claude:claude-opus-5": ["low", "medium", "high", "xhigh", "max"],
   "codex:gpt-5.6-sol": ["low", "medium", "high", "xhigh", "max", "ultra"],

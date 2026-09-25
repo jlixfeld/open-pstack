@@ -97,6 +97,19 @@ describe("runner CLI parsing", () => {
     );
   });
 
+  it("accepts dormant Claude Opus 5.5 lanes from a Codex parent", () => {
+    expect(parseArgs(argv([
+      "--parent", "codex",
+      "--provider", "claude",
+      "--model", "claude-opus-5-5",
+      "--effort", "medium",
+    ]))).toMatchObject({
+      provider: "claude",
+      model: "claude-opus-5-5",
+      effort: "medium",
+    });
+  });
+
   it("rejects unsupported provider, model, and family effort combinations", () => {
     expect(() => parseArgs(argv(["--model", "gpt-6-astra", "--effort", "ultra"]))).toThrow(
       "unsupported model or effort: codex:gpt-6-astra@ultra"

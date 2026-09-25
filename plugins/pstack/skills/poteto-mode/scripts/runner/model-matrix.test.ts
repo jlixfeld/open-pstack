@@ -243,6 +243,7 @@ describe("model matrix", () => {
     expect(JSON.stringify(documentedEfforts)).toBe(JSON.stringify(activeRunnerEfforts));
     expect(MODEL_EFFORTS["claude:claude-fable-5-1"]).toBeDefined();
     expect(MODEL_EFFORTS["claude:claude-opus-5"]).toBeDefined();
+    expect(MODEL_EFFORTS["claude:claude-opus-5-5"]).toBeDefined();
     expect(MODEL_EFFORTS["grok:grok-4.6"]).toBeDefined();
   });
 

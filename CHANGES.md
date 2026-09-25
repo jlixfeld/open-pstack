@@ -2,6 +2,15 @@
 
 This port applies the Cursor → Claude Code substitutions in skill bodies. Earlier drafts left them flagged; this revision resolves them. A later pass added a Codex build that shares the same skills; see [Codex port](#codex-port) below.
 
+## 1.4.2-E1 recognizes Claude Opus 5.5 runner lanes
+
+The external runner accepts the supported `claude-opus-5-5` identifier at
+`low` through `max` effort for immutable Claude lanes and receipts. Claude
+Opus 5.5 is not added to the active OpenAI-only setup matrix and no native
+Claude agents are shipped. Live Codex probes confirmed that GPT-6 Sol and Luna
+are unavailable to ChatGPT-authenticated Codex, so the proven Astra plus
+GPT-5.6 task map remains unchanged.
+
 ## 1.4.1-E1 syncs Cursor pstack 0.15.1 into the OpenAI-only experiment
 
 This release tracks Cursor pstack 0.15.1 at `f8abeddd1862dc73704e3d719dd73df0d51b8c71`.
