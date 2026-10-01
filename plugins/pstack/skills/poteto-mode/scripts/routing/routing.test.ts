@@ -13,12 +13,13 @@ describe("routing manifest", () => {
     expect(manifest.families.map((family) => family.family)).toEqual(["astra", "sol", "luna"]);
     for (const valid of [
       "codex:gpt-6-astra@xhigh",
-      "codex:gpt-6-sol@high",
+      "codex:gpt-6.1-sol@high",
       "codex:gpt-6-luna@max",
     ]) expect(parseLane(valid, manifest)).toBeDefined();
     for (const invalid of [
       "codex:gpt-6-astra@ultra",
-      "claude:gpt-6-sol@max",
+      "claude:gpt-6.1-sol@max",
+      "codex:gpt-6-sol@high",
       "codex:gpt-6-luna@ultra",
       "claude:claude-fable-5-1@max",
       "codex:gpt-6-missing@max",
@@ -30,20 +31,20 @@ describe("routing manifest", () => {
   it("uses the exact OpenAI-only first-run map", () => {
     const roles = defaultRoleMap(manifest);
     expect(roles.map((role) => role.role).slice(0, 2)).toEqual(["feature implementation", "refactoring implementation"]);
-    expect(roles.find((role) => role.role === "feature implementation")?.lanes.map(renderLane)).toEqual(["codex:gpt-6-sol@high"]);
+    expect(roles.find((role) => role.role === "feature implementation")?.lanes.map(renderLane)).toEqual(["codex:gpt-6.1-sol@high"]);
     expect(roles.find((role) => role.role === "refactoring implementation")?.lanes.map(renderLane)).toEqual(["codex:gpt-6-luna@high"]);
     expect(probePlan(roles).map(renderLane)).toEqual(expect.arrayContaining([
       "codex:gpt-6-astra@high", "codex:gpt-6-astra@medium", "codex:gpt-6-astra@xhigh",
-      "codex:gpt-6-sol@high", "codex:gpt-6-luna@high", "codex:gpt-6-luna@medium",
+      "codex:gpt-6.1-sol@high", "codex:gpt-6-luna@high", "codex:gpt-6-luna@medium",
     ]));
     expect(probePlan(roles).every((lane) => lane.provider === "codex")).toBe(true);
     expect(probePlan(roles).some((lane) => lane.effort === "max" || lane.effort === "ultra")).toBe(false);
     const expectedPanels = new Map([
-      ["how critics", ["codex:gpt-6-astra@medium", "codex:gpt-6-sol@medium"]],
-      ["arena runners", ["codex:gpt-6-astra@medium", "codex:gpt-6-sol@medium"]],
-      ["arena cross-judge pool", ["codex:gpt-6-astra@medium", "codex:gpt-6-sol@medium"]],
-      ["architect runners", ["codex:gpt-6-astra@high", "codex:gpt-6-sol@high"]],
-      ["interrogate reviewers", ["codex:gpt-6-astra@medium", "codex:gpt-6-sol@medium"]],
+      ["how critics", ["codex:gpt-6-astra@medium", "codex:gpt-6.1-sol@medium"]],
+      ["arena runners", ["codex:gpt-6-astra@medium", "codex:gpt-6.1-sol@medium"]],
+      ["arena cross-judge pool", ["codex:gpt-6-astra@medium", "codex:gpt-6.1-sol@medium"]],
+      ["architect runners", ["codex:gpt-6-astra@high", "codex:gpt-6.1-sol@high"]],
+      ["interrogate reviewers", ["codex:gpt-6-astra@medium", "codex:gpt-6.1-sol@medium"]],
     ]);
     for (const [roleName, expected] of expectedPanels) {
       const lanes = roles.find((role) => role.role === roleName)?.lanes ?? [];
@@ -58,21 +59,21 @@ describe("routing manifest", () => {
   });
 
   it("migrates the one unambiguous legacy combined role into two rows", () => {
-    const roles = parseRoleMap("feature, refactoring: codex:gpt-6-sol@high\n", manifest);
+    const roles = parseRoleMap("feature, refactoring: codex:gpt-6.1-sol@high\n", manifest);
     expect(roles.slice(0, 2).map((role) => role.lanes.map(renderLane))).toEqual([
-      ["codex:gpt-6-sol@high"],
-      ["codex:gpt-6-sol@high"],
+      ["codex:gpt-6.1-sol@high"],
+      ["codex:gpt-6.1-sol@high"],
     ]);
   });
 
   it("rejects unknown roles before and after known role rows", () => {
     expect(() => parseRoleMap([
-      "featre implementation: codex:gpt-6-sol@high",
-      "feature implementation: codex:gpt-6-sol@high",
+      "featre implementation: codex:gpt-6.1-sol@high",
+      "feature implementation: codex:gpt-6.1-sol@high",
     ].join("\n"), manifest)).toThrow("unknown role: featre implementation");
     expect(() => parseRoleMap([
-      "feature implementation: codex:gpt-6-sol@high",
-      "unknown role: codex:gpt-6-sol@max",
+      "feature implementation: codex:gpt-6.1-sol@high",
+      "unknown role: codex:gpt-6.1-sol@max",
     ].join("\n"), manifest)).toThrow("unknown role: unknown role");
   });
 
@@ -95,7 +96,7 @@ describe("routing manifest", () => {
 
   it("rejects invalid source identities even when edits replace them", () => {
     const edit: RoleAssignment = { role: "hardest tasks", lanes: [parseLane("codex:gpt-6-astra@xhigh", manifest)] };
-    const featureEdit: RoleAssignment = { role: "feature implementation", lanes: [parseLane("codex:gpt-6-sol@high", manifest)] };
+    const featureEdit: RoleAssignment = { role: "feature implementation", lanes: [parseLane("codex:gpt-6.1-sol@high", manifest)] };
     const refactoringEdit: RoleAssignment = { role: "refactoring implementation", lanes: [parseLane("codex:gpt-6-luna@high", manifest)] };
     expect(() => parseRoleMap("unknown role: claude:claude-fable-5-1@max\n", manifest, [edit])).toThrow("unknown role");
     expect(() => parseRoleMap("hardest tasks: claude:claude-fable-5-1@max\nhardest tasks: claude:claude-fable-5-1@max\n", manifest, [edit])).toThrow("duplicate role");
@@ -106,23 +107,23 @@ describe("routing manifest", () => {
 
   it("keeps untouched custom rows and rejects an unedited retired model", () => {
     const edit: RoleAssignment = { role: "hardest tasks", lanes: [parseLane("codex:gpt-6-astra@xhigh", manifest)] };
-    const sheet = "hardest tasks: claude:claude-fable-5-1@max\nhow critics: codex:gpt-6-sol@medium, codex:gpt-6-sol@medium\n";
+    const sheet = "hardest tasks: claude:claude-fable-5-1@max\nhow critics: codex:gpt-6.1-sol@medium, codex:gpt-6.1-sol@medium\n";
     expect(parseRoleMap(sheet, manifest, [edit]).find((role) => role.role === "how critics")?.lanes.map(renderLane))
-      .toEqual(["codex:gpt-6-sol@medium", "codex:gpt-6-sol@medium"]);
+      .toEqual(["codex:gpt-6.1-sol@medium", "codex:gpt-6.1-sol@medium"]);
     expect(() => parseRoleMap(`${sheet}how explainer: claude:claude-opus-5@xhigh\n`, manifest, [edit]))
       .toThrow("unknown descriptor family");
   });
 
   it("preserves panel lane order and duplicates while keeping a pool distinct", () => {
     const roles = parseRoleMap([
-      "how critics: codex:gpt-6-sol@high, codex:gpt-6-sol@high, codex:gpt-6-astra@high",
-      "arena cross-judge pool: codex:gpt-6-sol@high, codex:gpt-6-astra@high",
+      "how critics: codex:gpt-6.1-sol@high, codex:gpt-6.1-sol@high, codex:gpt-6-astra@high",
+      "arena cross-judge pool: codex:gpt-6.1-sol@high, codex:gpt-6-astra@high",
     ].join("\n"), manifest);
     expect(roles.find((role) => role.role === "how critics")?.lanes.map(renderLane)).toEqual([
-      "codex:gpt-6-sol@high", "codex:gpt-6-sol@high", "codex:gpt-6-astra@high",
+      "codex:gpt-6.1-sol@high", "codex:gpt-6.1-sol@high", "codex:gpt-6-astra@high",
     ]);
     expect(manifest.roles.find((role) => role.name === "arena cross-judge pool")?.shape).toBe("pool");
-    expect(probePlan(roles).filter((lane) => renderLane(lane) === "codex:gpt-6-sol@high")).toHaveLength(1);
+    expect(probePlan(roles).filter((lane) => renderLane(lane) === "codex:gpt-6.1-sol@high")).toHaveLength(1);
   });
 });
 

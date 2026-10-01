@@ -62,11 +62,13 @@ fi
 setup="$repo/plugins/pstack/skills/setup-pstack/SKILL.md"
 dispatch="$repo/plugins/pstack/skills/poteto-mode/references/provider-dispatch.md"
 route_bad=""
-grep -Fq '| feature implementation | single | codex:gpt-6-sol@high |' "$dispatch" || route_bad="missing GPT-6 Sol feature role"$'\n'
+grep -Fq '| feature implementation | single | codex:gpt-6.1-sol@high |' "$dispatch" || route_bad="missing GPT-6.1 Sol feature role"$'\n'
 grep -Fq '| refactoring implementation | single | codex:gpt-6-luna@high |' "$dispatch" || route_bad="missing GPT-6 Luna refactoring role"$'\n'
 grep -Fq '| arena cross-judge pool | pool |' "$dispatch" || route_bad="cross-judge is not a pool"$'\n'
-grep -Fq 'feature implementation: codex:gpt-6-sol@high' "$setup" || route_bad="setup misses split feature role"$'\n'
+grep -Fq 'feature implementation: codex:gpt-6.1-sol@high' "$setup" || route_bad="setup misses split feature role"$'\n'
 grep -Fq 'refactoring implementation: codex:gpt-6-luna@high' "$setup" || route_bad="setup misses split refactoring role"$'\n'
+grep -Fq 'Apply the selected budget effort to every real' "$setup" || route_bad="setup budget does not cover customized descriptors"$'\n'
+grep -Fq 'The exact efforts' "$setup" || route_bad="setup does not define the durable budget record"$'\n'
 if [ -n "$route_bad" ]; then
   note "FAIL: the routing registry and setup example drifted:"
   note "$route_bad"
@@ -385,6 +387,22 @@ if [ -n "$ready_before_proof_bad" ]; then
   fail=1
 else
   note "ok: callers retain the live-evidence draft gate"
+fi
+
+log_script="$plugin/skills/show-me-your-work/scripts/log.sh"
+log_scratch="$(mktemp -d)"
+log_file="$log_scratch/decisions.tsv"
+: > "$log_file"
+"$log_script" "$log_file" sync inspect baseline source imported
+"$log_script" "$log_file" sync adapt dispatch routing preserved
+log_headers="$(grep -c $'^ts\tphase\tdecision\twhy\tevidence\tresult$' "$log_file")"
+log_rows="$(wc -l < "$log_file" | tr -d ' ')"
+rm -r "$log_scratch"
+if [ "$log_headers" = "1" ] && [ "$log_rows" = "3" ]; then
+  note "ok: show-me-your-work logging appends without truncating prior rows"
+else
+  note "FAIL: show-me-your-work logging wrote headers=$log_headers rows=$log_rows"
+  fail=1
 fi
 
 if [ "${PSTACK_STATIC_ONLY:-0}" = "1" ]; then

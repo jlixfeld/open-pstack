@@ -16,6 +16,8 @@ Two modes:
 
 ## Explain Mode
 
+Before spawning, the parent reads the `how explorer` role line for each explorer and the `how explainer` role line for each explainer or synthesizer in the current harness's pstack model sheet. Use the documented default only when the sheet or role line is missing. Resolve aliases and unavailable descriptors through provider dispatch without substituting another model.
+
 ### Step 1. Understand the Question and Assess Complexity
 
 Parse what the user is asking about:
@@ -99,7 +101,7 @@ Run the full explain flow above (Steps 1-4). You must understand the architectur
 
 ### Step 2. Spawn Critics
 
-After the explanation is complete, start one architectural critic per descriptor in your configured how-critics list (defaults `codex:gpt-6-astra@medium`, `codex:gpt-6-sol@medium`) in one fan-out phase. The configured list is the complete critic count; consensus requires multiple completed lanes.
+After the explanation is complete, start one architectural critic per descriptor in your configured how-critics list (defaults `codex:gpt-6-astra@medium`, `codex:gpt-6.1-sol@medium`) in one fan-out phase. The configured list is the complete critic count; consensus requires multiple completed lanes.
 
 Route each critic descriptor in `read-only` mode. Use its configured effort without dynamic escalation or provider substitution.
 

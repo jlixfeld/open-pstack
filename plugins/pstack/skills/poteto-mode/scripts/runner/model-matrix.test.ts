@@ -68,7 +68,7 @@ const SHEET_ROLES = [
 const SETUP_SECTION_ORDER = [
   "### 2. Load current state",
   "### 3. Parse per-family efforts",
-  "### 4. Apply named role edits",
+  "### 4. Choose a reasoning budget and apply named role edits",
   "### 5. Probe the final map",
   "### 6. Render the exact final map",
   "### 7. Confirm and commit",
@@ -232,6 +232,7 @@ describe("model matrix", () => {
       ["luna", "medium"],
     ]);
     expect(rows.find((row) => row.family === "astra")?.model).toBe("gpt-6-astra");
+    expect(rows.find((row) => row.family === "sol")?.model).toBe("gpt-6.1-sol");
     const documentedEfforts = rows.map((row) => [
       `${row.provider}:${row.model}`,
       row.selectableEfforts,
@@ -314,11 +315,11 @@ describe("model matrix", () => {
       expect(row.selectableEfforts).toContain(asEffort(effort));
     }
     const expectedPanels = new Map([
-      ["how critics", "codex:gpt-6-astra@medium, codex:gpt-6-sol@medium"],
-      ["arena runners", "codex:gpt-6-astra@medium, codex:gpt-6-sol@medium"],
-      ["arena cross-judge pool", "codex:gpt-6-astra@medium, codex:gpt-6-sol@medium"],
-      ["architect runners", "codex:gpt-6-astra@high, codex:gpt-6-sol@high"],
-      ["interrogate reviewers", "codex:gpt-6-astra@medium, codex:gpt-6-sol@medium"],
+      ["how critics", "codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium"],
+      ["arena runners", "codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium"],
+      ["arena cross-judge pool", "codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium"],
+      ["architect runners", "codex:gpt-6-astra@high, codex:gpt-6.1-sol@high"],
+      ["interrogate reviewers", "codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium"],
     ]);
     for (const role of PANEL_ROLES) {
       const line = sheet
@@ -341,7 +342,7 @@ describe("model matrix", () => {
     expect(arena).toContain(`Otherwise default to ${consumer("arena runners").join(", ")}.`);
     expect(arena).toContain(`otherwise from ${consumer("arena cross-judge pool").join(", ")}.`);
     const architect = readFileSync(join(PLUGIN_ROOT, "skills/architect/SKILL.md"), "utf8");
-    expect(architect).toContain(`defaults ${consumer("architect runners").join(", ")})`);
+    expect(architect).toContain(`use ${consumer("architect runners").join(", ")}.`);
     const how = readFileSync(join(PLUGIN_ROOT, "skills/how/SKILL.md"), "utf8");
     expect(how).toContain(`default ${consumer("how explorer")[0]})`);
     expect(how).toContain(`default ${consumer("how explainer")[0]})`);

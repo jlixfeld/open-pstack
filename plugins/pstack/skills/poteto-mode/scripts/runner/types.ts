@@ -7,6 +7,7 @@ export const MODEL_EFFORTS = {
   "codex:gpt-6-astra": ["low", "medium", "high", "xhigh", "max"],
   "claude:claude-opus-5-5": ["low", "medium", "high", "xhigh", "max"],
   "codex:gpt-6-sol": ["low", "medium", "high", "xhigh", "max"],
+  "codex:gpt-6.1-sol": ["low", "medium", "high", "xhigh", "max"],
   "codex:gpt-6-luna": ["low", "medium", "high", "xhigh", "max"],
   "claude:claude-fable-5-1": ["low", "medium", "high", "xhigh", "max"],
   "claude:claude-opus-5": ["low", "medium", "high", "xhigh", "max"],
