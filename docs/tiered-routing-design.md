@@ -13,7 +13,7 @@ The operator runs `setup-pstack` from Claude Code or Codex. Setup loads the acti
 The first-run role map is:
 
 ```text
-feature implementation: codex:gpt-6-sol@high
+feature implementation: codex:gpt-6.1-sol@high
 refactoring implementation: codex:gpt-6-luna@high
 bug-fix: codex:gpt-6-astra@medium
 perf-issue: codex:gpt-6-astra@high
@@ -22,21 +22,21 @@ judgment and prose: codex:gpt-6-astra@medium
 hardest tasks: codex:gpt-6-astra@xhigh
 how explorer: codex:gpt-6-luna@medium
 how explainer: codex:gpt-6-astra@medium
-how critics: codex:gpt-6-astra@medium, codex:gpt-6-sol@medium
+how critics: codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium
 why investigators, synthesizer: inherit-parent
 reflect tooling, judgment, divergent, synthesizer: inherit-parent
-arena runners: codex:gpt-6-astra@medium, codex:gpt-6-sol@medium
-arena cross-judge pool: codex:gpt-6-astra@medium, codex:gpt-6-sol@medium
+arena runners: codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium
+arena cross-judge pool: codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium
 swarm workers: codex:gpt-6-luna@high
-architect runners: codex:gpt-6-astra@high, codex:gpt-6-sol@high
-interrogate reviewers: codex:gpt-6-astra@medium, codex:gpt-6-sol@medium
+architect runners: codex:gpt-6-astra@high, codex:gpt-6.1-sol@high
+interrogate reviewers: codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium
 ```
 
 The local upstream command fetches `cursor/plugins` and reports changes between the recorded Cursor commit and the current default branch, restricted to `pstack/`. The weekly workflow runs the same comparison and reconciles one marker-owned issue in this fork.
 
 ## Shape
 
-`provider-dispatch.md` remains the human and machine-readable routing manifest. Its active capability table defines GPT-6 Astra, Sol, and Luna. Every active family supports the portable `low` through `max` range; pstack does not expose Sol and Luna's `none` effort, and no active family accepts `ultra`. The runner retains dormant Claude and Grok acceptance for existing immutable lanes and receipts, including Claude Opus 5.5, without making those families active selections.
+`provider-dispatch.md` remains the human and machine-readable routing manifest. Its active capability table defines GPT-6 Astra, GPT-6.1 Sol, and GPT-6 Luna. Every active family supports the portable `low` through `max` range; pstack does not expose Luna's `none` effort, and no active family accepts `ultra`. The runner retains dormant GPT-6 Sol, Claude, and Grok acceptance for existing immutable lanes and receipts, including Claude Opus 5.5, without making those families active selections.
 
 The manifest also owns the ordered role registry and first-run lanes. A role has one of three shapes:
 

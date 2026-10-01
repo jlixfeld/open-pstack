@@ -2,6 +2,30 @@
 
 This port applies the Cursor → Claude Code substitutions in skill bodies. Earlier drafts left them flagged; this revision resolves them. A later pass added a Codex build that shares the same skills; see [Codex port](#codex-port) below.
 
+## Unreleased uses GPT-6.1 Sol for workhorse roles
+
+The active Sol family now uses GPT-6.1 Sol for feature implementation and the
+Sol lanes in Arena, How critics, Architect, and Interrogate. GPT-6 Astra remains
+the choice for the most demanding and judgment-heavy roles. GPT-6 Luna remains
+the efficient choice for refactoring, exploration, and swarm work.
+
+The runner still accepts GPT-6 Sol for immutable existing lanes and receipts.
+Setup does not rewrite saved model sheets implicitly. Operators can replace a
+retired descriptor through the existing explicit role-edit flow.
+
+This update also syncs Lauren Tan's pstack 0.15.2 through 0.15.5 changes at
+`2eb7ed4613cfc8f098dfe464a23680ea44d84c5e`. It imports the shorter review and
+principle instructions, neutral operator wording, append-safe decision logging,
+reasoning-budget setup guidance, and the latest workflow corrections. The
+rendered role descriptors remain the single durable record of the selected
+budget. `README-UPSTREAM.md` remains a verbatim copy of the upstream README.
+
+Open Pstack keeps its provider-qualified GPT map instead of Cursor's Opus and
+Grok defaults. It also keeps the `how critics` role, MCP-native Why and Reflect
+roles, no-fallback runner contract, no elapsed-time cancellation rule, and the
+draft-until-installed-live-proof gate. Cursor-only plugin metadata and tutorial
+pages remain excluded.
+
 ## 1.5.0 routes active work through the GPT-6 family
 
 The active setup matrix now uses GPT-6 Astra, Sol, and Luna. Sol high owns

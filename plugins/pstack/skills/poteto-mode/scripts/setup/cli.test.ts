@@ -18,7 +18,7 @@ function fixture() {
     probes: join(directory, "probes.json"),
   };
   writeFileSync(paths.manifest, manifest);
-  writeFileSync(paths.sheet, "feature, refactoring: codex:gpt-6-sol@high\n");
+  writeFileSync(paths.sheet, "feature, refactoring: codex:gpt-6.1-sol@high\n");
   writeFileSync(paths.integration, "operator notes\n");
   return paths;
 }
@@ -180,7 +180,7 @@ describe("pstack-setup CLI", () => {
     expect(main(["commit", "--plan", paths.plan, "--probe-results", paths.probes], { stdout: () => {}, stderr: () => {} })).toBe(0);
     const sheet = readFileSync(paths.sheet, "utf8");
     const integration = readFileSync(paths.integration, "utf8");
-    expect(sheet).toContain("feature implementation: codex:gpt-6-sol@high");
+    expect(sheet).toContain("feature implementation: codex:gpt-6.1-sol@high");
     expect(integration).toContain("<!-- pstack:models:begin -->");
     expect(statSync(paths.sheet).mode & 0o777).toBe(0o640);
     expect(statSync(paths.integration).mode & 0o777).toBe(0o644);

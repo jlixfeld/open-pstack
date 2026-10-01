@@ -10,23 +10,12 @@ Verify every task output by checking the real thing directly. Do not infer from 
 
 **Why:** Unverified work has unknown correctness. Indirect verification (file mtimes, output freshness, agent self-reports, cached screenshots) feels cheaper than direct observation. Acting on a wrong inference costs far more than checking the source.
 
-**Pattern:** After completing any task, ask: "how do I prove this actually works?"
-
 Check the real thing, not a proxy:
 - Check process liveness directly, not indirectly through derived state
 - Read the actual value, not a cached or derived representation
 - When verification fails, suspect the observation method before suspecting the system
 
-Code and features:
-1. Build it (necessary but not sufficient)
-2. Run it and exercise the actual feature path
-3. Check the full chain: does data flow from input to output?
-4. For integrations, test the full communication path end-to-end
-
 For code changes, complete the [changed branch coverage review](references/changed-branch-coverage.md). Record a measured review when existing tooling can identify changed branches. Otherwise record why coverage is unavailable and the substitute verification. Inspect every changed branch gap. Do not treat a percentage as proof that the behavior works.
-
-Delegation: trust artifacts, not self-reports.
-When verifying delegated work, inspect the actual output artifact (git diff, file contents, runtime behavior), not the delegate's summary.
 
 ## Script the check when you can
 

@@ -1,6 +1,6 @@
 ---
 name: setup-pstack
-description: Configure pstack's provider-qualified per-role model map and parent-owned routes. Verifies each final-map descriptor before writing the override sheet. Use for /setup-pstack, "configure pstack models", or changing pstack's model choices.
+description: Configure pstack's provider-qualified per-role model map, reasoning budget, and parent-owned routes. Verifies each final-map descriptor before writing the override sheet. Use for /setup-pstack, "configure pstack models", "pstack budget", or changing pstack's model choices.
 ---
 
 # Setup pstack
@@ -75,7 +75,30 @@ Read the model matrix. Every non-alias value must match `<provider>:<model>@<eff
 
 An old sheet may name a retired model. Replace that role only through an explicit named edit; every untouched role must validate against the active matrix. The source row must still have valid descriptor syntax, provider and effort tokens, role identity, and cardinality. Edits never hide duplicate or unknown roles. If any inconsistency remains, show the conflicting rows and request its correction. Do not probe or write while any inconsistency is unresolved. Different roles may intentionally use different efforts from the same family; preserve their exact descriptors.
 
-### 4. Apply named role edits
+### 4. Choose a reasoning budget and apply named role edits
+
+Ask for one budget with these exact labels:
+
+- `unlimited` keeps every first-run effort from the role registry.
+- `large` sets every real descriptor to `xhigh`.
+- `medium` sets every real descriptor to `high`.
+- `small` sets every real descriptor to `medium`.
+
+Build the budget result from the complete first-run registry. On a rerun, start
+from the normalized current map so every customized family, lane list, alias,
+and lane order survives. Apply the selected budget effort to every real
+descriptor, including customized lanes. Leave `inherit-parent` and `auto`
+unchanged. If a
+family does not support the requested effort, show the mismatch and require an
+explicit role choice. Never choose a nearby model or effort as a fallback.
+
+Translate the budget result into explicit named `--edit` values for `prepare`.
+For `unlimited`, restore the registry effort when a role still uses its
+first-run family and restore each customized family's documented default effort
+otherwise. Do not retain reductions from an earlier budget. The exact efforts
+in the rendered descriptors are the durable budget record; do not add a second
+mutable budget setting. Show the complete result before probing so the operator
+can change named roles.
 
 Show the complete ordered role registry and retain it by default. Apply only explicitly named role edits. A single role needs exactly one lane; panels and pools preserve every entered lane and its order. `arena cross-judge pool` is a pool, not a panel. `inherit-parent` and `auto` remain valid aliases.
 
@@ -94,7 +117,7 @@ Receipts and native transcripts prove the requested effort and the route. They d
 Build the new sheet in memory. Do not write it yet.
 
 - First run: start from the complete role registry below.
-- Rerun: start from the normalized complete role map from step 2, preserving each loaded row's lane order and exact descriptor (or alias) per lane.
+- Rerun: start from the normalized complete role map from step 2, preserving each loaded row's family, lane order, and alias; apply the selected budget effort to every real descriptor as specified in step 4.
 
 Ask whether to keep those role assignments or change named roles. Keeping them is the default. Apply only role changes the operator names; never offer a reset of a customized sheet to the first-run assignments. A changed lane may use any validated matrix family and effort, `inherit-parent`, or `auto`.
 
@@ -117,7 +140,7 @@ After the operator confirms, recheck both target baselines before writing the in
 
 Provider-qualified per-role choices. Read the installed pstack provider-dispatch reference before dispatching a configured role. Confirming this model sheet is standing authorization to send a pstack role's assigned source code and task context to every selected provider; do not request separate source-code egress approval for a role selected from this confirmed sheet. Every documented role remains present. `inherit-parent` and `auto` use the parent model natively and still count as one stored lane.
 
-feature implementation: codex:gpt-6-sol@high
+feature implementation: codex:gpt-6.1-sol@high
 refactoring implementation: codex:gpt-6-luna@high
 bug-fix: codex:gpt-6-astra@medium
 perf-issue: codex:gpt-6-astra@high
@@ -126,14 +149,14 @@ judgment and prose: codex:gpt-6-astra@medium
 hardest tasks: codex:gpt-6-astra@xhigh
 how explorer: codex:gpt-6-luna@medium
 how explainer: codex:gpt-6-astra@medium
-how critics: codex:gpt-6-astra@medium, codex:gpt-6-sol@medium
+how critics: codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium
 why investigators, synthesizer: inherit-parent
 reflect tooling, judgment, divergent, synthesizer: inherit-parent
-arena runners: codex:gpt-6-astra@medium, codex:gpt-6-sol@medium
-arena cross-judge pool: codex:gpt-6-astra@medium, codex:gpt-6-sol@medium
+arena runners: codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium
+arena cross-judge pool: codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium
 swarm workers: codex:gpt-6-luna@high
-architect runners: codex:gpt-6-astra@high, codex:gpt-6-sol@high
-interrogate reviewers: codex:gpt-6-astra@medium, codex:gpt-6-sol@medium
+architect runners: codex:gpt-6-astra@high, codex:gpt-6.1-sol@high
+interrogate reviewers: codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium
 ```
 
 ### 8. Wire it in

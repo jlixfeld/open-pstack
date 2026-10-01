@@ -11,10 +11,10 @@ pstack model choices are provider-qualified descriptors:
 | Family | Upstream pstack choice | Provider | Model | Default effort | Selectable efforts | Claude-native agent stem |
 |---|---|---|---|---|---|---|
 | astra | gpt-6-astra-high | codex | gpt-6-astra | medium | low medium high xhigh max | - |
-| sol | gpt-6-sol-high | codex | gpt-6-sol | medium | low medium high xhigh max | - |
+| sol | gpt-6-sol-high | codex | gpt-6.1-sol | medium | low medium high xhigh max | - |
 | luna | gpt-6-luna-high | codex | gpt-6-luna | medium | low medium high xhigh max | - |
 
-The active matrix routes work only to the GPT-6 family. Every active family supports `low`, `medium`, `high`, `xhigh`, and `max`; GPT-6 Sol and Luna also support `none`, but pstack does not expose a no-reasoning lane. `ultra` is not a supported effort for these families. The runner retains dormant Claude and Grok acceptance for immutable existing lanes and receipt parsing, including Claude Opus 5.5; those families are not selectable through this active matrix. A Claude-native agent stem of `-` means no native agent is shipped.
+The active matrix routes work only to the GPT-6 family. Every active family supports `low`, `medium`, `high`, `xhigh`, and `max`; GPT-6 Luna also supports `none`, but pstack does not expose a no-reasoning lane. `ultra` is not a supported effort for these families. The runner retains dormant GPT-6 Sol, Claude, and Grok acceptance for immutable existing lanes and receipt parsing, including Claude Opus 5.5; those families are not selectable through this active matrix. A Claude-native agent stem of `-` means no native agent is shipped.
 
 Use `medium` for broad work and independent review. Select `high` explicitly for coupled retry, persisted state, authentication, or concurrency work. Use `xhigh` for the hardest tasks. `max` is an explicit operator choice; no first-run lane selects `max` or `ultra`. The map does not dynamically raise effort. See the [Astra effort experiment](../../../../../docs/astra-effort-experiment.md) for the recorded evidence.
 
@@ -26,7 +26,7 @@ one lane. A `panel` launches every stored lane in order, including repeats. A
 
 | Role | Shape | First-run lanes |
 | --- | --- | --- |
-| feature implementation | single | codex:gpt-6-sol@high |
+| feature implementation | single | codex:gpt-6.1-sol@high |
 | refactoring implementation | single | codex:gpt-6-luna@high |
 | bug-fix | single | codex:gpt-6-astra@medium |
 | perf-issue | single | codex:gpt-6-astra@high |
@@ -35,14 +35,14 @@ one lane. A `panel` launches every stored lane in order, including repeats. A
 | hardest tasks | single | codex:gpt-6-astra@xhigh |
 | how explorer | single | codex:gpt-6-luna@medium |
 | how explainer | single | codex:gpt-6-astra@medium |
-| how critics | panel | codex:gpt-6-astra@medium, codex:gpt-6-sol@medium |
+| how critics | panel | codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium |
 | why investigators, synthesizer | panel | inherit-parent |
 | reflect tooling, judgment, divergent, synthesizer | panel | inherit-parent |
-| arena runners | panel | codex:gpt-6-astra@medium, codex:gpt-6-sol@medium |
-| arena cross-judge pool | pool | codex:gpt-6-astra@medium, codex:gpt-6-sol@medium |
+| arena runners | panel | codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium |
+| arena cross-judge pool | pool | codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium |
 | swarm workers | single | codex:gpt-6-luna@high |
-| architect runners | panel | codex:gpt-6-astra@high, codex:gpt-6-sol@high |
-| interrogate reviewers | panel | codex:gpt-6-astra@medium, codex:gpt-6-sol@medium |
+| architect runners | panel | codex:gpt-6-astra@high, codex:gpt-6.1-sol@high |
+| interrogate reviewers | panel | codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium |
 
 Arena, Architect, How critics, and Interrogate run their stored Astra and Sol lanes independently and in order. Their judge pool chooses a model different from the likely base when possible. Panel list length is the only reviewer or candidate count; do not silently deduplicate, add, or omit lanes. Consensus applies only when multiple completed lanes independently agree. Feature implementation uses Sol, while refactoring, exploration, and swarm work use Luna where its throughput profile fits the work.
 

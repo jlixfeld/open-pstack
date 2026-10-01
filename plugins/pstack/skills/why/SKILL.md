@@ -11,6 +11,8 @@ Companion to the `how` skill. `how` answers what the code does and how it works.
 
 **Dispatch contract.** Resolve every configured role through [`provider-dispatch.md`](../poteto-mode/references/provider-dispatch.md). Investigators require the parent's live MCP surface, so the default and supported portable route is `inherit-parent` (or its `auto` alias). Pass the code anchor by path. On Codex, resolve remaining Claude tool names via [`codex-tools.md`](../poteto-mode/references/codex-tools.md).
 
+Before spawning, the parent reads the `why investigators, synthesizer` role line for every investigator and the synthesizer in the current harness's pstack model sheet. If the sheet or line is missing, use `inherit-parent`. Resolve `auto` and `inherit-parent` natively through provider dispatch, preserving the parent's MCP access.
+
 ## Operating Posture
 
 Operate as a **careful, cautious, and precise investigator**. Be honest about what you know vs what you're inferring. Read `references/epistemics.md` for the full confidence framework and phrasing guide. The synthesizer must follow it.

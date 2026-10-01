@@ -27,6 +27,8 @@ Three transcript layouts: legacy flat (`<id>.jsonl`), current nested (`<id>/<id>
 
 For each candidate, read the first JSONL line and check that `message.content[0].text` contains the conversation's opening user prompt. Take the matching path. If no path resolves, write a tight digest of the session and pass that instead.
 
+Before spawning, the parent reads the `reflect tooling, judgment, divergent, synthesizer` role line for every reviewer and the synthesizer in the current harness's pstack model sheet. If the sheet or line is missing, use `inherit-parent`. Resolve aliases natively through provider dispatch, preserving the parent's MCP access.
+
 ### 2. Spawn three reviewers in parallel
 
 Start all three read-only lanes in one fan-out phase through provider dispatch. Reviewers need MCP access for context lookups (tickets, chat threads, observability traces referenced in the transcript), so keep them native to the parent. The prompt forbids file writes; the parent applies edits.
