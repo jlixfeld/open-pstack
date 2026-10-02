@@ -6,45 +6,41 @@ pstack model choices are provider-qualified descriptors:
 <provider>:<model>@<effort>
 ```
 
-## Model matrix
+The current harness's personal model sheet is the only source of model and effort assignments. Setup accepts descriptor syntax, then probes each exact selection on its resolved route before writing. The external runner validates route structure and passes the selected model and effort to the provider CLI. Provider execution establishes availability; failures name the selected route. A role with no assignment cannot launch. Before launching a workflow role, resolve it with the installed `pstack-setup` CLI:
 
-| Family | Upstream pstack choice | Provider | Model | Default effort | Selectable efforts | Claude-native agent stem |
-|---|---|---|---|---|---|---|
-| astra | gpt-6-astra-high | codex | gpt-6-astra | medium | low medium high xhigh max | - |
-| sol | gpt-6-sol-high | codex | gpt-6.1-sol | medium | low medium high xhigh max | - |
-| luna | gpt-6-luna-high | codex | gpt-6-luna | medium | low medium high xhigh max | - |
+```text
+pstack-setup resolve --parent <claude|codex> --manifest <installed provider-dispatch.md> --sheet <current harness pstack-models.md> --role "<registry role>"
+```
 
-The active matrix routes work only to the GPT-6 family. Every active family supports `low`, `medium`, `high`, `xhigh`, and `max`; GPT-6 Luna also supports `none`, but pstack does not expose a no-reasoning lane. `ultra` is not a supported effort for these families. The runner retains dormant GPT-6 Sol, Claude, and Grok acceptance for immutable existing lanes and receipt parsing, including Claude Opus 5.5; those families are not selectable through this active matrix. A Claude-native agent stem of `-` means no native agent is shipped.
-
-Use `medium` for broad work and independent review. Select `high` explicitly for coupled retry, persisted state, authentication, or concurrency work. Use `xhigh` for the hardest tasks. `max` is an explicit operator choice; no first-run lane selects `max` or `ultra`. The map does not dynamically raise effort. See the [Astra effort experiment](../../../../../docs/astra-effort-experiment.md) for the recorded evidence.
+The read-only result gives the exact stored descriptor and route for every ordered lane. Missing sheets, the requested role, or malformed rows fail with exit 64. A newly added, unrelated role does not block an existing configured workflow; setup still requires a complete map before writing. Do not launch any lane after a resolution failure.
 
 ## Role registry
 
-The registry is the first-run map and sheet schema. A `single` role has exactly
+The registry defines role names and shapes. A `single` role has exactly
 one lane. A `panel` launches every stored lane in order, including repeats. A
 `pool` preserves ordered lanes while the workflow chooses one.
 
-| Role | Shape | First-run lanes |
-| --- | --- | --- |
-| feature implementation | single | codex:gpt-6.1-sol@high |
-| refactoring implementation | single | codex:gpt-6-luna@high |
-| bug-fix | single | codex:gpt-6-astra@medium |
-| perf-issue | single | codex:gpt-6-astra@high |
-| hillclimb | single | codex:gpt-6-astra@high |
-| judgment and prose | single | codex:gpt-6-astra@medium |
-| hardest tasks | single | codex:gpt-6-astra@xhigh |
-| how explorer | single | codex:gpt-6-luna@medium |
-| how explainer | single | codex:gpt-6-astra@medium |
-| how critics | panel | codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium |
-| why investigators, synthesizer | panel | inherit-parent |
-| reflect tooling, judgment, divergent, synthesizer | panel | inherit-parent |
-| arena runners | panel | codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium |
-| arena cross-judge pool | pool | codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium |
-| swarm workers | single | codex:gpt-6-luna@high |
-| architect runners | panel | codex:gpt-6-astra@high, codex:gpt-6.1-sol@high |
-| interrogate reviewers | panel | codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium |
+| Role | Shape |
+| --- | --- |
+| feature implementation | single |
+| refactoring implementation | single |
+| bug-fix | single |
+| perf-issue | single |
+| hillclimb | single |
+| judgment and prose | single |
+| hardest tasks | single |
+| how explorer | single |
+| how explainer | single |
+| how critics | panel |
+| why investigators, synthesizer | panel |
+| reflect tooling, judgment, divergent, synthesizer | panel |
+| arena runners | panel |
+| arena cross-judge pool | pool |
+| swarm workers | single |
+| architect runners | panel |
+| interrogate reviewers | panel |
 
-Arena, Architect, How critics, and Interrogate run their stored Astra and Sol lanes independently and in order. Their judge pool chooses a model different from the likely base when possible. Panel list length is the only reviewer or candidate count; do not silently deduplicate, add, or omit lanes. Consensus applies only when multiple completed lanes independently agree. Feature implementation uses Sol, while refactoring, exploration, and swarm work use Luna where its throughput profile fits the work.
+Panels run every stored lane independently and in order. The judge pool chooses a model different from the likely base when possible. Panel list length is the only reviewer or candidate count; do not silently deduplicate, add, or omit lanes. Consensus applies only when multiple completed lanes independently agree.
 
 ## Authorization boundary
 
@@ -63,13 +59,13 @@ The top-level harness resolves the route once. A child receives an assigned prov
 | Claude Code | native `Agent` | external runner | external runner |
 | Codex | external runner | native `spawn_agent` | external runner |
 
-`inherit-parent` and `auto` remain aliases. They use the parent's current model and effort through its native subagent primitive. In a panel they still consume one lane. Under a Claude parent that may be non-OpenAI; OpenAI-only execution requires a Codex OpenAI parent. The route resolver has no fallback branch.
+`inherit-parent` and `auto` are valid only when written explicitly in the personal sheet. They use the parent's current model and effort through its native subagent primitive. In a panel they still consume one lane. The route resolver has no fallback branch.
 
 ## Native lanes
 
 Native dispatch avoids a second CLI startup and its base context.
 
-- Claude Code: active descriptors use the external Codex runner. This package ships no pinned Claude model agents. Generic inherited helpers still use the parent's native `Agent` tool.
+- Claude Code: dispatch configured Claude descriptors through the native `Agent` tool with the exact model and effort when the host supports those controls. A configured alias uses the current parent settings.
 - Codex: call `spawn_agent` with the descriptor's model and `reasoning_effort`, the complete task, grounding paths, access mode, and unique output location. Use an isolated worktree for a writer. Codex subagents already run concurrently.
 
 Do not send a same-provider descriptor to the external runner. It rejects that call because the native route is cheaper and already available.
@@ -104,7 +100,7 @@ identity. A managed coordinator preserves the exact lane for its scheduled
 retry. An unmanaged caller preserves the paused result and keeps the panel
 incomplete; it does not apply Arena, Swarm, or Interrogate's N-1 dropout rule.
 
-Pass arguments as an argv array or quote every path. Never interpolate prompt text into a shell command. The launcher preflights the assigned CLI and authentication, invokes the model exactly once, disables recursive agents and ambient skill dispatch where the CLI supports it, restricts the built-in tool surface, and records the exact provider/model/effort flags. External lanes do not receive the parent's MCP surface. Keep MCP-dependent Why and Reflect roles on `inherit-parent` or `auto`. The launcher never falls back.
+Pass arguments as an argv array or quote every path. Never interpolate prompt text into a shell command. The launcher preflights the assigned CLI and authentication, invokes the model exactly once, disables recursive agents and ambient skill dispatch where the CLI supports it, restricts the built-in tool surface, and records the exact provider/model/effort flags. External lanes do not receive the parent's MCP surface. Configure MCP-dependent Why and Reflect roles with native routes or explicit aliases. The launcher never falls back.
 
 Grok authentication preflight has one bounded retry. If the first `grok models` result would be classified as unauthenticated, the runner waits five seconds and tries the same preflight once more. A second failure is terminal. The delay and second attempt share the runner's absolute deadline and cancellation latch, and the receipt keeps evidence from both attempts. Model execution is never retried.
 

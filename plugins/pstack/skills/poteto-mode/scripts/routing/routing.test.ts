@@ -1,140 +1,88 @@
 import { describe, expect, it } from "bun:test";
-import { resolveRoute } from "./dispatch.ts";
-import { parseManifest } from "./manifest.ts";
-import { defaultRoleMap, parseLane, parseRoleMap, probePlan, renderLane, type RoleAssignment } from "./role-map.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { resolveRoute } from "./dispatch.ts";
+import { parseManifest } from "./manifest.ts";
+import { parseLane, parseRoleMap, probePlan, renderLane, renderRoleMap, type RoleAssignment } from "./role-map.ts";
 
 const dispatch = readFileSync(join(import.meta.dir, "../../references/provider-dispatch.md"), "utf8");
 const manifest = parseManifest(dispatch);
+const complete = (lane: string): string => manifest.roles.map((role) => `${role.name}: ${lane}`).join("\n") + "\n";
 
-describe("routing manifest", () => {
-  it("recognizes the active GPT-6 families", () => {
-    expect(manifest.families.map((family) => family.family)).toEqual(["astra", "sol", "luna"]);
-    for (const valid of [
-      "codex:gpt-6-astra@xhigh",
-      "codex:gpt-6.1-sol@high",
-      "codex:gpt-6-luna@max",
-    ]) expect(parseLane(valid, manifest)).toBeDefined();
-    for (const invalid of [
-      "codex:gpt-6-astra@ultra",
-      "claude:gpt-6.1-sol@max",
-      "codex:gpt-6-sol@high",
-      "codex:gpt-6-luna@ultra",
-      "claude:claude-fable-5-1@max",
-      "codex:gpt-6-missing@max",
-    ]) {
-      expect(() => parseLane(invalid, manifest)).toThrow();
-    }
+describe("personal role map", () => {
+  it("accepts native Claude or Codex descriptors without choosing a model", () => {
+    expect(renderLane(parseLane("claude:claude-opus-5-5@high"))).toBe("claude:claude-opus-5-5@high");
+    expect(renderLane(parseLane("codex:gpt-6.1-sol@medium"))).toBe("codex:gpt-6.1-sol@medium");
+    for (const invalid of ["claude-opus", "openai:model@high", "claude:bad model@high", "codex:model@other"])
+      expect(() => parseLane(invalid)).toThrow();
   });
 
-  it("uses the exact OpenAI-only first-run map", () => {
-    const roles = defaultRoleMap(manifest);
-    expect(roles.map((role) => role.role).slice(0, 2)).toEqual(["feature implementation", "refactoring implementation"]);
-    expect(roles.find((role) => role.role === "feature implementation")?.lanes.map(renderLane)).toEqual(["codex:gpt-6.1-sol@high"]);
-    expect(roles.find((role) => role.role === "refactoring implementation")?.lanes.map(renderLane)).toEqual(["codex:gpt-6-luna@high"]);
-    expect(probePlan(roles).map(renderLane)).toEqual(expect.arrayContaining([
-      "codex:gpt-6-astra@high", "codex:gpt-6-astra@medium", "codex:gpt-6-astra@xhigh",
-      "codex:gpt-6.1-sol@high", "codex:gpt-6-luna@high", "codex:gpt-6-luna@medium",
-    ]));
-    expect(probePlan(roles).every((lane) => lane.provider === "codex")).toBe(true);
-    expect(probePlan(roles).some((lane) => lane.effort === "max" || lane.effort === "ultra")).toBe(false);
-    const expectedPanels = new Map([
-      ["how critics", ["codex:gpt-6-astra@medium", "codex:gpt-6.1-sol@medium"]],
-      ["arena runners", ["codex:gpt-6-astra@medium", "codex:gpt-6.1-sol@medium"]],
-      ["arena cross-judge pool", ["codex:gpt-6-astra@medium", "codex:gpt-6.1-sol@medium"]],
-      ["architect runners", ["codex:gpt-6-astra@high", "codex:gpt-6.1-sol@high"]],
-      ["interrogate reviewers", ["codex:gpt-6-astra@medium", "codex:gpt-6.1-sol@medium"]],
-    ]);
-    for (const [roleName, expected] of expectedPanels) {
-      const lanes = roles.find((role) => role.role === roleName)?.lanes ?? [];
-      expect(lanes.map(renderLane)).toEqual(expected);
-    }
-    expect(roles.find((role) => role.role === "bug-fix")?.lanes.map(renderLane)).toEqual([
-      "codex:gpt-6-astra@medium",
-    ]);
-    expect(roles.find((role) => role.role === "hardest tasks")?.lanes.map(renderLane)).toEqual([
-      "codex:gpt-6-astra@xhigh",
-    ]);
+  it("requires every role and never inserts an alias or model", () => {
+    expect(() => parseRoleMap("", manifest)).toThrow("missing pstack model assignments: feature implementation");
+    expect(() => parseRoleMap("feature implementation: inherit-parent\n", manifest)).toThrow("missing pstack model assignments: refactoring implementation");
+    const roles = parseRoleMap(complete("inherit-parent"), manifest);
+    expect(roles).toHaveLength(manifest.roles.length);
+    expect(roles.every((role) => role.lanes.length === 1 && role.lanes[0] === "inherit-parent")).toBe(true);
+    expect(probePlan(roles)).toEqual([]);
   });
 
-  it("migrates the one unambiguous legacy combined role into two rows", () => {
-    const roles = parseRoleMap("feature, refactoring: codex:gpt-6.1-sol@high\n", manifest);
-    expect(roles.slice(0, 2).map((role) => role.lanes.map(renderLane))).toEqual([
-      ["codex:gpt-6.1-sol@high"],
-      ["codex:gpt-6.1-sol@high"],
-    ]);
+  it("allows an explicit edit for each missing upgrade role", () => {
+    const sheet = complete("auto").replace("hardest tasks: auto\n", "");
+    const edit: RoleAssignment = { role: "hardest tasks", lanes: [parseLane("claude:claude-opus-5-5@high")] };
+    expect(() => parseRoleMap(sheet, manifest)).toThrow("hardest tasks");
+    expect(parseRoleMap(sheet, manifest, [edit]).find((role) => role.role === "hardest tasks")?.lanes.map(renderLane))
+      .toEqual(["claude:claude-opus-5-5@high"]);
   });
 
-  it("rejects unknown roles before and after known role rows", () => {
-    expect(() => parseRoleMap([
-      "featre implementation: codex:gpt-6.1-sol@high",
-      "feature implementation: codex:gpt-6.1-sol@high",
-    ].join("\n"), manifest)).toThrow("unknown role: featre implementation");
-    expect(() => parseRoleMap([
-      "feature implementation: codex:gpt-6.1-sol@high",
-      "unknown role: codex:gpt-6.1-sol@max",
-    ].join("\n"), manifest)).toThrow("unknown role: unknown role");
+  it("resolves configured roles from a partial upgrade map while setup still rejects it", () => {
+    const upgraded = { roles: [...manifest.roles, { name: "upgrade role", shape: "single" as const }] };
+    const sheet = complete("auto");
+    expect(() => parseRoleMap(sheet, upgraded)).toThrow("upgrade role");
+    expect(parseRoleMap(sheet, upgraded, [], false).find((role) => role.role === "feature implementation")?.lanes.map(renderLane)).toEqual(["auto"]);
+    expect(parseRoleMap(sheet, upgraded, [], false).some((role) => role.role === "upgrade role")).toBe(false);
   });
 
-  it("replaces an explicit retired source row while validating its structure", () => {
-    const edit: RoleAssignment = { role: "hardest tasks", lanes: [parseLane("codex:gpt-6-astra@xhigh", manifest)] };
-    expect(parseRoleMap("hardest tasks: claude:claude-fable-5-1@max\n", manifest, [edit])
-      .find((role) => role.role === "hardest tasks")?.lanes.map(renderLane)).toEqual(["codex:gpt-6-astra@xhigh"]);
-    expect(() => parseRoleMap("hardest tasks: claude:claude-fable-5-1@max\n", manifest)).toThrow("unknown descriptor family");
-    expect(() => parseRoleMap("hardest tasks: malformed\n", manifest, [edit])).toThrow("invalid descriptor");
-    expect(() => parseRoleMap("hardest tasks: claude:claude-fable-5-1@max, codex:gpt-6-astra@high\n", manifest, [edit])).toThrow("must have exactly one lane");
+  it("expands a legacy combined row without altering its descriptor", () => {
+    const sheet = complete("auto")
+      .replace("feature implementation: auto\nrefactoring implementation: auto\n", "feature, refactoring: codex:gpt-6.1-sol@high\n");
+    expect(parseRoleMap(sheet, manifest).slice(0, 2).map((role) => role.lanes.map(renderLane)))
+      .toEqual([["codex:gpt-6.1-sol@high"], ["codex:gpt-6.1-sol@high"]]);
   });
 
-  it("rejects malformed retired model slugs even when an explicit edit replaces them", () => {
-    const edit: RoleAssignment = { role: "hardest tasks", lanes: [parseLane("codex:gpt-6-astra@xhigh", manifest)] };
-    for (const malformed of ["claude fable-5-1", "claude:fable-5-1", "claude-fable-5-1?"]) {
-      expect(() => parseRoleMap(`hardest tasks: claude:${malformed}@max\n`, manifest, [edit]))
-        .toThrow("invalid descriptor");
-    }
-  });
-
-  it("rejects invalid source identities even when edits replace them", () => {
-    const edit: RoleAssignment = { role: "hardest tasks", lanes: [parseLane("codex:gpt-6-astra@xhigh", manifest)] };
-    const featureEdit: RoleAssignment = { role: "feature implementation", lanes: [parseLane("codex:gpt-6.1-sol@high", manifest)] };
-    const refactoringEdit: RoleAssignment = { role: "refactoring implementation", lanes: [parseLane("codex:gpt-6-luna@high", manifest)] };
-    expect(() => parseRoleMap("unknown role: claude:claude-fable-5-1@max\n", manifest, [edit])).toThrow("unknown role");
-    expect(() => parseRoleMap("hardest tasks: claude:claude-fable-5-1@max\nhardest tasks: claude:claude-fable-5-1@max\n", manifest, [edit])).toThrow("duplicate role");
-    expect(() => parseRoleMap("feature, refactoring: claude:claude-fable-5-1@max\nfeature implementation: codex:gpt-6-astra@high\n", manifest, [edit, featureEdit, refactoringEdit])).toThrow("duplicate role");
-    expect(() => parseRoleMap("hardest tasks:claude:claude-fable-5-1@max\n", manifest, [edit])).toThrow("invalid role row");
-    expect(() => parseRoleMap("", manifest, [edit, edit])).toThrow("duplicate role edit");
-  });
-
-  it("keeps untouched custom rows and rejects an unedited retired model", () => {
-    const edit: RoleAssignment = { role: "hardest tasks", lanes: [parseLane("codex:gpt-6-astra@xhigh", manifest)] };
-    const sheet = "hardest tasks: claude:claude-fable-5-1@max\nhow critics: codex:gpt-6.1-sol@medium, codex:gpt-6.1-sol@medium\n";
-    expect(parseRoleMap(sheet, manifest, [edit]).find((role) => role.role === "how critics")?.lanes.map(renderLane))
-      .toEqual(["codex:gpt-6.1-sol@medium", "codex:gpt-6.1-sol@medium"]);
-    expect(() => parseRoleMap(`${sheet}how explainer: claude:claude-opus-5@xhigh\n`, manifest, [edit]))
-      .toThrow("unknown descriptor family");
-  });
-
-  it("preserves panel lane order and duplicates while keeping a pool distinct", () => {
-    const roles = parseRoleMap([
-      "how critics: codex:gpt-6.1-sol@high, codex:gpt-6.1-sol@high, codex:gpt-6-astra@high",
-      "arena cross-judge pool: codex:gpt-6.1-sol@high, codex:gpt-6-astra@high",
-    ].join("\n"), manifest);
+  it("preserves panel order, duplicate lanes, and distinct pool shape", () => {
+    const sheet = complete("auto").replace("how critics: auto\n", "how critics: claude:claude-opus-5-5@high, claude:claude-opus-5-5@high, codex:gpt-6.1-sol@medium\n");
+    const roles = parseRoleMap(sheet, manifest);
     expect(roles.find((role) => role.role === "how critics")?.lanes.map(renderLane)).toEqual([
-      "codex:gpt-6.1-sol@high", "codex:gpt-6.1-sol@high", "codex:gpt-6-astra@high",
+      "claude:claude-opus-5-5@high", "claude:claude-opus-5-5@high", "codex:gpt-6.1-sol@medium",
     ]);
     expect(manifest.roles.find((role) => role.name === "arena cross-judge pool")?.shape).toBe("pool");
-    expect(probePlan(roles).filter((lane) => renderLane(lane) === "codex:gpt-6.1-sol@high")).toHaveLength(1);
+    expect(probePlan(roles).map(renderLane)).toEqual(["claude:claude-opus-5-5@high", "codex:gpt-6.1-sol@medium"]);
+    expect(renderRoleMap(roles)).toContain("how critics: claude:claude-opus-5-5@high, claude:claude-opus-5-5@high, codex:gpt-6.1-sol@medium");
+  });
+
+  it("rejects malformed, unknown, duplicate, and wrong-shape entries before launching", () => {
+    for (const bad of [
+      complete("auto").replace("bug-fix: auto", "bug-fix: malformed"),
+      `${complete("auto")}unknown role: auto\n`,
+      `${complete("auto")}bug-fix: auto\n`,
+      complete("auto").replace("bug-fix: auto", "bug-fix: auto, auto"),
+    ]) expect(() => parseRoleMap(bad, manifest)).toThrow();
+  });
+
+  it("keeps edits explicit and validates source rows", () => {
+    const edit: RoleAssignment = { role: "hardest tasks", lanes: [parseLane("codex:gpt-6.1-sol@high")] };
+    expect(() => parseRoleMap(complete("auto").replace("hardest tasks: auto", "hardest tasks: malformed"), manifest, [edit])).toThrow("invalid descriptor");
+    expect(() => parseRoleMap(complete("auto"), manifest, [edit, edit])).toThrow("duplicate role edit");
   });
 });
 
 describe("route resolver", () => {
-  it("routes every same-parent descriptor natively and cross-parent descriptor externally", () => {
+  it("keeps explicit same-parent and alias routes native", () => {
     expect(resolveRoute("claude", "claude")).toBe("native");
     expect(resolveRoute("claude", "codex")).toBe("external");
     expect(resolveRoute("codex", "codex")).toBe("native");
     expect(resolveRoute("codex", "claude")).toBe("external");
     expect(resolveRoute("claude", "grok")).toBe("external");
-    expect(resolveRoute("codex", "grok")).toBe("external");
     expect(resolveRoute("claude", "inherit-parent")).toBe("native");
     expect(resolveRoute("codex", "auto")).toBe("native");
   });

@@ -3,8 +3,11 @@ import { chmodSync, existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, st
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { canonicalTarget, commit, isMissingPathError, main, prepare } from "./cli.ts";
+import { parseManifest } from "../routing/manifest.ts";
 
 const manifest = readFileSync(join(import.meta.dir, "../../references/provider-dispatch.md"), "utf8");
+const fullSheet = parseManifest(manifest).roles.map((role) => `${role.name}: inherit-parent`).join("\n") + "\n";
+const legacySheet = fullSheet.replace("feature implementation: inherit-parent\nrefactoring implementation: inherit-parent\n", "feature, refactoring: codex:gpt-6.1-sol@high\n");
 const directories: string[] = [];
 
 function fixture() {
@@ -18,7 +21,7 @@ function fixture() {
     probes: join(directory, "probes.json"),
   };
   writeFileSync(paths.manifest, manifest);
-  writeFileSync(paths.sheet, "feature, refactoring: codex:gpt-6.1-sol@high\n");
+  writeFileSync(paths.sheet, legacySheet);
   writeFileSync(paths.integration, "operator notes\n");
   return paths;
 }
@@ -48,6 +51,78 @@ afterEach(() => {
 });
 
 describe("pstack-setup CLI", () => {
+  it("resolves only stored lanes and fails closed for missing or malformed maps", () => {
+    const paths = fixture();
+    const args = ["resolve", "--parent", "claude", "--manifest", paths.manifest, "--sheet", paths.sheet, "--role", "arena runners"];
+    writeFileSync(paths.sheet, fullSheet.replace("arena runners: inherit-parent", "arena runners: claude:claude-opus-5-5@high, claude:claude-opus-5-5@high"));
+    let output = "";
+    expect(main(args, { stdout: (value) => { output += value; }, stderr: () => {} })).toBe(0);
+    expect(JSON.parse(output)).toEqual({
+      sheet: paths.sheet,
+      role: "arena runners",
+      shape: "panel",
+      lanes: [
+        { descriptor: "claude:claude-opus-5-5@high", route: "native" },
+        { descriptor: "claude:claude-opus-5-5@high", route: "native" },
+      ],
+    });
+    writeFileSync(paths.sheet, fullSheet.replace("arena runners: inherit-parent\n", ""));
+    let error = "";
+    expect(main(args, { stdout: () => {}, stderr: (value) => { error += value; } })).toBe(64);
+    expect(error).toContain("arena runners");
+    rmSync(paths.sheet);
+    error = "";
+    expect(main(args, { stdout: () => {}, stderr: (value) => { error += value; } })).toBe(64);
+    expect(error).toContain("missing pstack model sheet");
+  });
+
+  it("keeps configured workflows usable when an upgrade adds an unrelated role", () => {
+    const paths = fixture();
+    writeFileSync(paths.manifest, manifest.replace("| interrogate reviewers | panel |", "| interrogate reviewers | panel |\n| upgrade role | single |"));
+    let output = "";
+    expect(main(["resolve", "--parent", "codex", "--manifest", paths.manifest, "--sheet", paths.sheet, "--role", "feature implementation"], {
+      stdout: (value) => { output += value; }, stderr: () => {},
+    })).toBe(0);
+    expect(JSON.parse(output).lanes).toEqual([{ descriptor: "codex:gpt-6.1-sol@high", route: "native" }]);
+
+    let error = "";
+    expect(main(["resolve", "--parent", "codex", "--manifest", paths.manifest, "--sheet", paths.sheet, "--role", "upgrade role"], {
+      stdout: () => {}, stderr: (value) => { error += value; },
+    })).toBe(64);
+    expect(error).toContain("missing pstack model assignment for role: upgrade role");
+    expect(main(prepareArgs(paths), { stdout: () => {}, stderr: () => {} })).toBe(64);
+    expect(existsSync(paths.plan)).toBe(false);
+  });
+
+  it("requires explicit assignments on a fresh installation", () => {
+    const paths = fixture();
+    rmSync(paths.sheet);
+    let stderr = "";
+    expect(main(prepareArgs(paths), { stdout: () => {}, stderr: (value) => { stderr += value; } })).toBe(64);
+    expect(stderr).toContain("missing pstack model assignments");
+    expect(stderr).toContain("feature implementation");
+    expect(existsSync(paths.plan)).toBe(false);
+    expect(existsSync(paths.sheet)).toBe(false);
+
+    const edits = parseManifest(manifest).roles.map((role) => `${role.name}=inherit-parent`);
+    expect(main(prepareArgs(paths, edits), { stdout: () => {}, stderr: () => {} })).toBe(0);
+    expect(planProbes(paths.plan)).toEqual([]);
+    expect(existsSync(paths.sheet)).toBe(false);
+  });
+
+  it("reports a newly required role without changing an existing personal sheet", () => {
+    const paths = fixture();
+    const before = fullSheet.replace("how critics: inherit-parent\n", "");
+    writeFileSync(paths.sheet, before);
+    let stderr = "";
+    expect(main(prepareArgs(paths), { stdout: () => {}, stderr: (value) => { stderr += value; } })).toBe(64);
+    expect(stderr).toContain("how critics");
+    expect(readFileSync(paths.sheet, "utf8")).toBe(before);
+    expect(existsSync(paths.plan)).toBe(false);
+    expect(main(prepareArgs(paths, ["how critics=inherit-parent,inherit-parent"]), { stdout: () => {}, stderr: () => {} })).toBe(0);
+    expect(readFileSync(paths.sheet, "utf8")).toBe(before);
+  });
+
   it("canonicalizes tilde and relative setup targets while preserving include aliases", () => {
     expect(canonicalTarget("~/.claude/pstack-models.md", "/work/repo", "/Users/operator")).toEqual({
       path: "/Users/operator/.claude/pstack-models.md",
@@ -79,7 +154,7 @@ describe("pstack-setup CLI", () => {
 
   it("replays an explicit replacement for a retired sheet row through commit", () => {
     const paths = fixture();
-    writeFileSync(paths.sheet, "hardest tasks: claude:claude-fable-5-1@max\n");
+    writeFileSync(paths.sheet, legacySheet.replace("hardest tasks: inherit-parent", "hardest tasks: claude:claude-fable-5-1@max"));
     expect(main(prepareArgs(paths, ["hardest tasks=codex:gpt-6-astra@xhigh"]), { stdout: () => {}, stderr: () => {} })).toBe(0);
     expect(planProbes(paths.plan)).toContain("codex:gpt-6-astra@xhigh");
     writePassingProbes(paths);
@@ -152,6 +227,7 @@ describe("pstack-setup CLI", () => {
     expect(readFileSync(paths.sheet, "utf8")).toBe("operator change\n");
 
     rmSync(paths.plan);
+    writeFileSync(paths.sheet, legacySheet);
     expect(main(prepareArgs(paths), { stdout: () => {}, stderr: () => {} })).toBe(0);
     writeFileSync(paths.probes, JSON.stringify(planProbes(paths.plan).map((descriptor, index) => ({ descriptor, passed: index !== 0 }))));
     const before = readFileSync(paths.sheet, "utf8");

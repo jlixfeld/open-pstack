@@ -1,104 +1,25 @@
-# Tiered routing design
+# Personal model routing design
 
-## Problem
+## Contract
 
-The active model sheet stores exact role descriptors, but setup currently asks for one effort per mandatory model family. That flow cannot represent different Codex models or efforts per role. It also cannot preserve a selected effort for a family that no active role uses. Setup and rollback exist only as instructions, so tests cannot prove final-map probe planning, write rollback, or byte-identical reruns.
+PStack defines workflow roles and their shapes. The current harness's personal sheet supplies every model, effort, and alias assignment. Claude Code reads `~/.claude/pstack-models.md`; Codex reads `~/.codex/pstack-models.md`. Those paths are outside the plugin installation, so an update cannot regenerate their choices.
 
-The fork also needs a repeatable report for changes under `cursor/plugins/pstack`. The report must not update source code or mix Lauren backports with Eric port updates.
+The shared [`provider-dispatch.md`](../plugins/pstack/skills/poteto-mode/references/provider-dispatch.md) registry carries a role name and one shape per row. A `single` role has exactly one lane. A `panel` launches every ordered lane, including repeats. A `pool` preserves ordered alternatives while its workflow selects one. The registry contains no first-run descriptors, model families, or default efforts.
 
-## Usage
+Every workflow reads its named role from the current harness's sheet before launch. A missing sheet, missing role, malformed descriptor, or wrong lane count is a hard error. Setup also requires every registry role before committing a sheet. On a new installation or after an upgrade adds a role, the operator assigns each missing role explicitly. `inherit-parent` and `auto` work only when written in the sheet. There is no injected alias, cross-harness search, or model fallback.
 
-The operator runs `setup-pstack` from Claude Code or Codex. Setup loads the active map, applies named role edits, and shows every role and lane with its parent-specific route. It derives one probe for each distinct exact descriptor in that final map. Aliases do not produce probes. Setup asks for confirmation only after every probe passes.
+## Setup transaction
 
-The first-run role map is:
+`pstack-setup prepare` parses existing rows and named edits, validates role identity and cardinality, and renders the complete proposed sheet and harness integration in memory. It expands a legacy `feature, refactoring` row into the two named roles without changing either lane. It rejects duplicate or unknown roles, malformed rows, and remaining missing roles. A named edit may replace a syntactically valid obsolete selection. Existing assignments, ordered lanes, and repeats stay intact.
 
-```text
-feature implementation: codex:gpt-6.1-sol@high
-refactoring implementation: codex:gpt-6-luna@high
-bug-fix: codex:gpt-6-astra@medium
-perf-issue: codex:gpt-6-astra@high
-hillclimb: codex:gpt-6-astra@high
-judgment and prose: codex:gpt-6-astra@medium
-hardest tasks: codex:gpt-6-astra@xhigh
-how explorer: codex:gpt-6-luna@medium
-how explainer: codex:gpt-6-astra@medium
-how critics: codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium
-why investigators, synthesizer: inherit-parent
-reflect tooling, judgment, divergent, synthesizer: inherit-parent
-arena runners: codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium
-arena cross-judge pool: codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium
-swarm workers: codex:gpt-6-luna@high
-architect runners: codex:gpt-6-astra@high, codex:gpt-6.1-sol@high
-interrogate reviewers: codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium
-```
+Setup probes each distinct concrete `<provider>:<model>@<effort>` selection on its resolved route. A probe must use the exact model and effort. A failed or unavailable selection stops the transaction; no model or effort is substituted. Explicit aliases are native and add no descriptor probe. The external runner validates safe route syntax, then sends the exact selection to the provider CLI. Its production code contains no model-name catalog.
 
-The local upstream command fetches `cursor/plugins` and reports changes between the recorded Cursor commit and the current default branch, restricted to `pstack/`. The weekly workflow runs the same comparison and reconciles one marker-owned issue in this fork.
+After the operator reviews the exact route preview and probe results, `pstack-setup commit` checks that the manifest and both targets still match the prepared hashes. It writes only changed targets, verifies readback, and rolls back a failed write. A byte-identical rerun makes no active writes. Claude integration is one `@` include in `CLAUDE.md`; Codex integration is an exact bounded mirror in `AGENTS.md`. Setup rejects symlinks and malformed markers, and preserves unrelated instruction text.
 
-## Shape
+## Dispatch and verification
 
-`provider-dispatch.md` remains the human and machine-readable routing manifest. Its active capability table defines GPT-6 Astra, GPT-6.1 Sol, and GPT-6 Luna. Every active family supports the portable `low` through `max` range; pstack does not expose Luna's `none` effort, and no active family accepts `ultra`. The runner retains dormant GPT-6 Sol, Claude, and Grok acceptance for existing immutable lanes and receipts, including Claude Opus 5.5, without making those families active selections.
+The parent harness resolves every route once. Claude descriptors are native under Claude, and Codex descriptors are native under Codex. Cross-provider descriptors use the external runner. A child cannot change its assigned route. An unavailable model or CLI produces a named failure. The parent does not retry with a different model.
 
-The manifest also owns the ordered role registry and first-run lanes. A role has one of three shapes:
+Tests cover fresh and partial sheets, explicit edits, legacy row expansion, exact route and probe plans, panel order and repeats, pool shape, missing and malformed selections, failed probes, stale baselines, rollback, and idempotent reruns. The exact installed candidate still needs the live Claude Code and Codex behavioral checks required by [`AGENTS.md`](../AGENTS.md) before release.
 
-- A `single` role has exactly one lane.
-- A `panel` launches every lane in stored order, including repeated descriptors.
-- A `pool` preserves every lane in stored order while its workflow chooses one lane.
-
-The active model sheet contains exact `<provider>:<model>@<effort>` descriptors, `inherit-parent`, or `auto`. It does not contain fallback tiers or dynamic effort escalation. Medium is the broad-work and independent-review default; high is selected explicitly for coupled retry, persisted state, authentication, or concurrency work; xhigh remains for the hardest tasks; max has no default. A failed model never selects a different descriptor.
-
-The setup implementation exposes a real two-phase boundary:
-
-1. `prepare` parses the manifest and every current-sheet row, expands the legacy combined feature and refactoring row when unambiguous, validates row identity and cardinality, applies named edits as explicit replacements, renders both target byte arrays in memory, and derives the unique final-map probe plan. A retired descriptor can be replaced only by an explicit edit; malformed, duplicate, unknown, or unedited retired rows fail closed.
-2. The parent runs each probe with its native or external route, shows every role, lane, effort, and route, then asks for confirmation.
-3. `commit` rechecks both target baselines. If either target changed after `prepare`, it aborts without writing. Otherwise it atomically replaces changed files, reads both back, and restores every original snapshot after any write or readback failure. A target that did not exist before the transaction is removed during rollback.
-
-The active descriptors are Codex-native under a Codex parent and external under a Claude parent. `inherit-parent` and `auto` always use the parent-native route, so OpenAI-only execution needs a Codex OpenAI parent. Dormant legacy routes retain their existing runtime behavior. The route resolver has no fallback branch.
-
-The upstream monitor has two pure decisions behind thin command adapters. The comparison classifies the recorded Cursor tree, the Cursor head tree, and mapped local blobs. It reports net-zero changes, diverged history, changed `pstack/` paths, and paths that overlap fork-specific files. The issue decision supports create, update, reopen, close, and no-op transitions for one stable marker. Multiple marker-owned issues fail closed.
-
-## Module map
-
-```text
-plugins/pstack/skills/poteto-mode/scripts/
-  routing/
-    manifest.ts
-    role-map.ts
-    dispatch.ts
-  setup/
-    engine.ts
-    integration.ts
-    transaction.ts
-    cli.ts
-    pstack-setup
-  upstream-pstack/
-    compare.ts
-    facts.ts
-    git.ts
-    github.ts
-    issues.ts
-    cli.ts
-    pstack-upstream
-```
-
-`runner/` remains responsible for one already-resolved external lane. Workflow skills remain responsible for task policy, fan-out, and synthesis. The upstream monitor does not import the PR watcher.
-
-## Synthesis decision
-
-The original Terra candidate was the base because it put the role map at the center and kept the implementation small enough for one reviewable change. The original Sol candidate contributed the canonical Markdown manifest, family-specific effort support, the `pool` role shape, the real prepare and commit boundary, the stale-baseline check, and blob-based issue reconciliation. The current map replaces those retired GPT-5.6 lanes with their GPT-6 task-tier equivalents.
-
-The design uses one short-lived private plan to bind preview, probes, and commit. It rejects long-lived proof bundles, a filesystem journal, crash-recovery state, and a broad branded wire taxonomy. Those mechanisms add a second subsystem without improving the requested probe-failure and rollback guarantees. Probe outputs and receipts remain evidence, not active setup state.
-
-## Tradeoffs accepted
-
-- We accept strict parsing of the routing tables in exchange for one routing authority that both documentation and code can use.
-- We accept compensating rollback across two files because one rename cannot make two paths visible at the same instant.
-- We accept one long-lived tracking issue so weekly runs update a stable record instead of creating issue noise.
-- We accept a one-time legacy combined-role migration. Setup always renders separate feature and refactoring rows afterward.
-
-## Verification contract
-
-Tests must cover every supported family, invalid provider and model pairs, role cardinality, optional families, per-role efforts, exact probe planning, both parent route tables, ordered panels, pool behavior, failed-probe no-write behavior, stale baselines, rollback after each target write or readback, and unchanged byte-identical reruns.
-
-Upstream tests must cover no changes, unrelated repository changes, `pstack/` changes, overlap classification, deterministic issue text, create, update, reopen, close, no-op, and duplicate marker failures.
-
-The exact installed candidate must also pass the repository checks, the requested live model probes, and one mixed panel from each available parent.
+The upstream monitor is separate from this routing contract. It compares the recorded Cursor `pstack/` tree with the current upstream tree and reconciles one marker-owned issue when they differ.

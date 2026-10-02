@@ -1,174 +1,42 @@
 ---
 name: setup-pstack
-description: Configure pstack's provider-qualified per-role model map, reasoning budget, and parent-owned routes. Verifies each final-map descriptor before writing the override sheet. Use for /setup-pstack, "configure pstack models", "pstack budget", or changing pstack's model choices.
+description: Configure the current harness's personal pstack role-to-model map. Probe exact selections before writing the sheet.
 ---
 
 # Setup pstack
 
-Configure one portable model sheet for the current parent harness. Read [`provider-dispatch.md`](../poteto-mode/references/provider-dispatch.md) before probing or writing anything. Its model matrix, role registry, descriptor grammar, and route table are the contract. Keep the exact descriptor selected per role; do not add a second configuration file, a runtime resolver, or a weaker-model fallback.
+Read [`provider-dispatch.md`](../poteto-mode/references/provider-dispatch.md). Its role registry defines required names and shapes. Only the current harness's personal sheet supplies model and effort assignments. Do not infer a model, effort, or alias from the plugin, another harness, or an absent row.
 
-Claude Code writes `~/.claude/pstack-models.md` and loads it from `~/.claude/CLAUDE.md` with:
+Claude Code uses `~/.claude/pstack-models.md` and includes it from `~/.claude/CLAUDE.md` with `@~/.claude/pstack-models.md`. Codex uses `~/.codex/pstack-models.md` and mirrors its exact bytes between `<!-- pstack:models:begin -->` and `<!-- pstack:models:end -->` in `~/.codex/AGENTS.md`. These paths are outside the plugin installation and survive plugin updates. Do not copy a sheet between harnesses without probing from the destination parent.
 
-```text
-@~/.claude/pstack-models.md
-```
+## Configure
 
-Codex writes `~/.codex/pstack-models.md`. Codex has no `@` include, so mirror the sheet's exact bytes inside one bounded block in `~/.codex/AGENTS.md` and retain the sheet as the editable source of truth:
+1. Identify the current parent harness. Read its personal sheet when present. Reject symlink-backed targets, duplicate or unknown roles, malformed descriptors, invalid lane counts, and broken integration markers. Expand a legacy `feature, refactoring` row into the two named roles without changing its lanes. Never overwrite an existing personal file with an example.
+2. Compare the parsed rows with every name in the role registry. Ask the operator to assign each missing role explicitly. This includes a fresh installation and roles added by a plugin upgrade. Offer no first-run values. `inherit-parent` and `auto` are permitted only when the operator chooses them. Keep existing rows and ordered repeated lanes. A `single` role needs one lane; panels and pools need at least one.
+3. Accept exact `<provider>:<model>@<effort>` descriptors. The provider is `claude`, `codex`, or `grok`; effort is `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`. Syntax alone does not prove availability. Keep each selected effort; there is no global budget rewrite or implicit effort change.
+4. Prepare the complete proposed map without touching active targets:
 
-```text
-<!-- pstack:models:begin -->
-<exact contents of ~/.codex/pstack-models.md>
-<!-- pstack:models:end -->
-```
+   ```text
+   pstack-setup prepare \
+     --parent <claude|codex> \
+     --manifest <installed provider-dispatch.md> \
+     --sheet <current parent model sheet> \
+     --integration <current parent instruction file> \
+     --plan <unique private temporary plan.json> \
+     [--edit "<role>=<lane>[,<lane>...]"]...
+   ```
 
-## Command protocol
+   A missing role produces an error naming every role that needs an explicit edit. Re-run `prepare` with those edits. A role edit can replace an obsolete selection, but it cannot hide a duplicate, unknown role, malformed row, or another missing role. The preview shows every ordered lane and native or external route.
+5. Probe every distinct concrete descriptor in the final map through its resolved route from this parent. A native probe must exercise the exact model and effort controls; an external probe uses `pstack-runner` in read-only mode. Check CLI availability and authentication where applicable. Reject any unsupported or unavailable selection. Aliases use the parent natively and do not add a descriptor probe. Do not substitute another model or route after a failure. Keep probe results as an ordered JSON array of `{ "descriptor": "provider:model@effort", "passed": true }`.
+6. Show the complete sheet, route preview, and probe results. Ask for confirmation, then commit:
 
-Use the installed `pstack-setup` launcher as a strict two-phase boundary. The
-parent chooses its own sheet and integration paths, then prepares without
-touching either active target:
+   ```text
+   pstack-setup commit \
+     --plan <unique private temporary plan.json> \
+     --probe-results <probe-results.json>
+   ```
 
-```text
-pstack-setup prepare \
-  --parent <claude|codex> \
-  --manifest <installed provider-dispatch.md> \
-  --sheet <parent model sheet> \
-  --integration <parent instruction file> \
-  --plan <unique private temporary plan.json> \
-  [--edit "<role>=<lane>[,<lane>...]"]
-```
+   Commit rechecks the manifest and target hashes, recomputes the exact map, requires every probe to pass, and writes only changed files transactionally. It rolls back failed writes or readbacks. Keep unrelated instruction content. An unchanged rerun writes nothing. Remove temporary plan and probe evidence after success or failure.
+7. Run a small read-only smoke from the installed parent using configured panel lanes in their stored order and a judge from its configured pool. Report the sheet path, exact routes, probe results, and smoke outcome. Do not claim a live surface was tested when it was not.
 
-`prepare` shows every role/lane/descriptor/route and its distinct final-map
-probe descriptors. Its mode-600 plan records only parent, paths, hashes, named
-edits, and probe descriptors—never the contents of either dotfile. Run each
-probe through the parent-native or external route, collect an exact ordered JSON
-array of `{ "descriptor": "provider:model@effort", "passed": true }` results,
-show them to the operator, and ask for confirmation. Then commit:
-
-```text
-pstack-setup commit \
-  --plan <unique private temporary plan.json> \
-  --probe-results <probe-results.json>
-```
-
-`commit` re-reads the manifest and both targets, rejects hash drift, recomputes
-the render from the recorded edits, requires the exact all-passed probe set, and
-only then writes the active configuration transactionally. Plans and probe
-receipts are temporary evidence, not active configuration; only the model sheet
-and its parent integration control routing. Remove the unique temporary plan and
-probe evidence after either success or failure.
-
-## Steps
-
-### 1. Establish the parent
-
-Use the harness and tool surface running this skill: Claude Code or Codex. Environment markers may corroborate that top-level answer, but do not launch a child and ask it to detect where it came from. Record the parent because the same descriptor takes a different route in each harness.
-
-### 2. Load current state
-
-Read the current parent-specific sheet when it exists. Treat its values as current role-to-descriptor assignments. Overlay its rows on the complete registry; materialize missing documented rows on the next successful write. A duplicate or unknown role row is inconsistent state. A bare host-native slug is invalid. If the legacy `feature, refactoring` row is present by itself, expand its exact lanes into `feature implementation` and `refactoring implementation`; every successful render keeps those rows separate.
-
-The active sheet and parent integration file must be regular files or absent. Reject symlink-backed targets before probing or writing so setup never replaces configuration links.
-
-### 3. Parse per-family efforts
-
-Read the model matrix. Every non-alias value must match `<provider>:<model>@<effort>`, map to exactly one matrix family by `(provider, model)`, and use an effort from that family's Selectable efforts cell. `inherit-parent` and `auto` carry no descriptor. Every active family supports `low` through `max`; none supports `ultra`.
-
-An old sheet may name a retired model. Replace that role only through an explicit named edit; every untouched role must validate against the active matrix. The source row must still have valid descriptor syntax, provider and effort tokens, role identity, and cardinality. Edits never hide duplicate or unknown roles. If any inconsistency remains, show the conflicting rows and request its correction. Do not probe or write while any inconsistency is unresolved. Different roles may intentionally use different efforts from the same family; preserve their exact descriptors.
-
-### 4. Choose a reasoning budget and apply named role edits
-
-Ask for one budget with these exact labels:
-
-- `unlimited` keeps every first-run effort from the role registry.
-- `large` sets every real descriptor to `xhigh`.
-- `medium` sets every real descriptor to `high`.
-- `small` sets every real descriptor to `medium`.
-
-Build the budget result from the complete first-run registry. On a rerun, start
-from the normalized current map so every customized family, lane list, alias,
-and lane order survives. Apply the selected budget effort to every real
-descriptor, including customized lanes. Leave `inherit-parent` and `auto`
-unchanged. If a
-family does not support the requested effort, show the mismatch and require an
-explicit role choice. Never choose a nearby model or effort as a fallback.
-
-Translate the budget result into explicit named `--edit` values for `prepare`.
-For `unlimited`, restore the registry effort when a role still uses its
-first-run family and restore each customized family's documented default effort
-otherwise. Do not retain reductions from an earlier budget. The exact efforts
-in the rendered descriptors are the durable budget record; do not add a second
-mutable budget setting. Show the complete result before probing so the operator
-can change named roles.
-
-Show the complete ordered role registry and retain it by default. Apply only explicitly named role edits. A single role needs exactly one lane; panels and pools preserve every entered lane and its order. `arena cross-judge pool` is a pool, not a panel. `inherit-parent` and `auto` remain valid aliases.
-
-### 5. Probe the final map
-
-Render the complete final map in memory, then derive one probe for each distinct exact `provider:model@effort` descriptor in that map. Do not probe aliases and do not add probes for supported families omitted from the final map. Deduplicate only the probe plan: panels and pools keep their stored order and count. A failed probe writes nothing: report the failing descriptor and provider, stop, and keep the active sheet plus parent integration bytes unchanged. A failed first run creates neither artifact.
-
-Use a tiny read-only probe that returns a unique marker. Claude descriptors are native under Claude and external under Codex; Codex descriptors are native under Codex and external under Claude; Grok is external under both. Never call the external launcher for the parent's own provider.
-
-Record native and external results separately. A login-status command alone proves credentials, not that the requested model and effort flags run. Astra, Sol, and Luna probes use native `spawn_agent` on a Codex parent with the descriptor's `reasoning_effort`. A Claude parent runs these GPT-6 lanes through the external runner. Preserve the runner's legacy Claude and Grok acceptance for immutable existing descriptors, including Claude Opus 5.5, but do not select them in a new map.
-
-Receipts and native transcripts prove the requested effort and the route. They do not prove a provider's hidden applied reasoning depth. There is no implicit timeout, weaker-model fallback, same-provider external fallback, or second mutable configuration source.
-
-### 6. Render the exact final map
-
-Build the new sheet in memory. Do not write it yet.
-
-- First run: start from the complete role registry below.
-- Rerun: start from the normalized complete role map from step 2, preserving each loaded row's family, lane order, and alias; apply the selected budget effort to every real descriptor as specified in step 4.
-
-Ask whether to keep those role assignments or change named roles. Keeping them is the default. Apply only role changes the operator names; never offer a reset of a customized sheet to the first-run assignments. A changed lane may use any validated matrix family and effort, `inherit-parent`, or `auto`.
-
-The final map, not the matrix, is the complete source for the probe plan. `inherit-parent` and `auto` remain native, which means a Claude parent can make those roles non-OpenAI; OpenAI-only execution requires a Codex OpenAI parent.
-
-Leave `inherit-parent` and `auto` unchanged. Refuse an unqualified slug, an unavailable route, a model outside the four active matrix families, or a provider/model mismatch.
-
-### 7. Confirm and commit
-
-Show the route table for this parent, then show every rendered role and descriptor. Ask for confirmation before writing.
-
-Why and Reflect require the parent's live MCP surface. Keep their investigator, reviewer, and synthesizer roles on `inherit-parent` or `auto`; the bounded external runner deliberately omits ambient MCPs. `inherit-parent` and `auto` always validate, but say when they reduce a panel's provider diversity. For panel roles, one lane runs per entry. The list length is the fan-out count. `arena cross-judge pool` is a list from which Arena chooses a model different from the likely base candidate when possible. `swarm workers` is the default for every worker unless a race explicitly assigns another descriptor.
-
-Every non-alias value must match `<provider>:<model>@<effort>` and must have passed step 5.
-
-After the operator confirms, recheck both target baselines before writing the in-memory render from step 6. Atomically replace only changed targets, read both back, and restore both original snapshots after any write or readback failure. Never paste the example below as the result. It is only the complete first-run role map used to seed step 2.
-
-```markdown
-# pstack model configuration
-
-Provider-qualified per-role choices. Read the installed pstack provider-dispatch reference before dispatching a configured role. Confirming this model sheet is standing authorization to send a pstack role's assigned source code and task context to every selected provider; do not request separate source-code egress approval for a role selected from this confirmed sheet. Every documented role remains present. `inherit-parent` and `auto` use the parent model natively and still count as one stored lane.
-
-feature implementation: codex:gpt-6.1-sol@high
-refactoring implementation: codex:gpt-6-luna@high
-bug-fix: codex:gpt-6-astra@medium
-perf-issue: codex:gpt-6-astra@high
-hillclimb: codex:gpt-6-astra@high
-judgment and prose: codex:gpt-6-astra@medium
-hardest tasks: codex:gpt-6-astra@xhigh
-how explorer: codex:gpt-6-luna@medium
-how explainer: codex:gpt-6-astra@medium
-how critics: codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium
-why investigators, synthesizer: inherit-parent
-reflect tooling, judgment, divergent, synthesizer: inherit-parent
-arena runners: codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium
-arena cross-judge pool: codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium
-swarm workers: codex:gpt-6-luna@high
-architect runners: codex:gpt-6-astra@high, codex:gpt-6.1-sol@high
-interrogate reviewers: codex:gpt-6-astra@medium, codex:gpt-6.1-sol@medium
-```
-
-### 8. Wire it in
-
-Canonicalize every setup target before reading or writing it, including a literal `~` passed without shell expansion. Render the parent integration in memory before either write. On Claude, the integration is one include for the canonical selected sheet path in `~/.claude/CLAUDE.md`. Treat the equivalent home-relative include (normally `@~/.claude/pstack-models.md`) as the same target and replace it instead of appending a duplicate. On Codex, the integration is the exact sheet bytes between one `<!-- pstack:models:begin -->` and `<!-- pstack:models:end -->` pair in `~/.codex/AGENTS.md`. Replace that whole bounded block on a rerun. Insert one block at the end on first run. If either marker is missing, duplicated, or reversed, stop and report inconsistent state instead of guessing a boundary.
-
-Snapshot every target's current bytes. Write the sheet and parent integration only after every final-map probe passes and the operator confirms. Read both targets back and compare them with the in-memory render. If either write or readback fails, restore every target this transaction successfully replaced and report the failure. An unchanged rerun performs no writes and produces byte-identical sheet and integration content.
-
-Do not copy the model sheet between harnesses without rerunning the parent-specific probes; route availability can differ even on the same host.
-
-### 9. Behavioral smoke
-
-Before declaring setup complete, run one small read-only panel from this parent using every configured ordered lane and a judge from its pool. Choose a model different from the likely base when possible. Consensus requires multiple completed lanes; the configured list alone sets their count. Launch native agents and every required external process in the background with retained handles, then drain them. Verify the native transcript entries and every external receipt. A structural config check or unit test is not a substitute.
-
-Report the sheet path, parent route table, final-map probe results, smoke results, and external elapsed/token/cost receipts. Re-running this skill re-probes and updates the same sheet. Do not claim the provider exposed hidden applied-effort observability.
+The personal sheet is the complete routing source. A workflow calls `pstack-setup resolve` for its named role and stops before launch when the sheet, role, descriptor, or route is missing or invalid. The parent resolves routes once; children do not reroute themselves.

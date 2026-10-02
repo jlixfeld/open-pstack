@@ -16,7 +16,7 @@ Two modes:
 
 ## Explain Mode
 
-Before spawning, the parent reads the `how explorer` role line for each explorer and the `how explainer` role line for each explainer or synthesizer in the current harness's pstack model sheet. Use the documented default only when the sheet or role line is missing. Resolve aliases and unavailable descriptors through provider dispatch without substituting another model.
+Before spawning, the parent requires the `how explorer` role line for each explorer and the `how explainer` role line for each explainer or synthesizer in the current harness's pstack model sheet. If the sheet or either role is missing or invalid, stop before launching. Resolve explicit aliases and unavailable descriptors through provider dispatch without substituting another model.
 
 ### Step 1. Understand the Question and Assess Complexity
 
@@ -46,7 +46,7 @@ Decompose the question into 2-4 parallel exploration angles, each a distinct sli
 
 The right decomposition depends on the question. Use your judgment. Narrow questions: 2 explorers is fine. Broad subsystems: up to 4.
 
-Start all explorers in one fan-out phase through provider dispatch. Use your configured how-explorer descriptor (default `codex:gpt-6-luna@medium`) in `read-only` mode. A native lane uses the parent subagent primitive; an external lane uses the launcher directly.
+Start all explorers in one fan-out phase through provider dispatch. Use the configured `how explorer` descriptor in `read-only` mode. A native lane uses the parent subagent primitive; an external lane uses the launcher directly.
 
 Each explorer gets the same base prompt from `references/explorer-prompt.md` plus a specific exploration angle naming its slice. Each explorer should:
 - Start broad: Glob for relevant directories, Grep for key types/interfaces/class names
@@ -61,7 +61,7 @@ Then proceed to Step 3.
 
 ### Step 2b. Direct Explain (simple questions)
 
-Dispatch one read-only lane that explores and explains in one pass using your configured how-explainer descriptor (default `codex:gpt-6-astra@medium`).
+Dispatch one read-only lane that explores and explains in one pass using the configured `how explainer` descriptor.
 
 The agent does its own exploration (Glob, Grep, Read) and writes the explanation directly. Read `references/explainer-prompt.md` for the communication style and output format. Same structure, just no explorer findings as input.
 
@@ -69,7 +69,7 @@ Proceed to Step 4.
 
 ### Step 3. Synthesize (complex questions only)
 
-Once all explorers return, dispatch one read-only lane to synthesize their findings into one coherent explanation using your configured how-explainer descriptor (default `codex:gpt-6-astra@medium`).
+Once all explorers return, dispatch one read-only lane to synthesize their findings into one coherent explanation using the configured `how explainer` descriptor.
 
 The explainer gets all explorers' findings and writes the human-facing explanation (output format below). Read `references/explainer-prompt.md` for the full prompt template. The explainer reconciles overlapping findings, resolves contradictions, and weaves the slices into a unified picture.
 
@@ -101,7 +101,7 @@ Run the full explain flow above (Steps 1-4). You must understand the architectur
 
 ### Step 2. Spawn Critics
 
-After the explanation is complete, start one architectural critic per descriptor in your configured how-critics list (defaults `codex:gpt-6-astra@medium`, `codex:gpt-6.1-sol@medium`) in one fan-out phase. The configured list is the complete critic count; consensus requires multiple completed lanes.
+After the explanation is complete, require the `how critics` role and start one architectural critic per stored descriptor in one fan-out phase. The configured list is the complete critic count; consensus requires multiple completed lanes.
 
 Route each critic descriptor in `read-only` mode. Use its configured effort without dynamic escalation or provider substitution.
 

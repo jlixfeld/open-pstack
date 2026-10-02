@@ -97,37 +97,28 @@ describe("runner CLI parsing", () => {
     );
   });
 
-  it("accepts the GPT-6 family and dormant Claude Opus 5.5 lanes", () => {
-    for (const model of ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
+  it("accepts any safe map-provided model slug on an external route", () => {
+    for (const model of ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "new-model.2027"]) {
       expect(parseArgs(argv(["--model", model, "--effort", "high"]))?.model).toBe(model);
     }
     expect(parseArgs(argv([
       "--parent", "codex",
       "--provider", "claude",
-      "--model", "claude-opus-5-5",
+      "--model", "claude-new.2027",
       "--effort", "medium",
     ]))).toMatchObject({
       provider: "claude",
-      model: "claude-opus-5-5",
+      model: "claude-new.2027",
       effort: "medium",
     });
   });
 
-  it("rejects unsupported provider, model, and family effort combinations", () => {
-    expect(() => parseArgs(argv(["--model", "gpt-6-astra", "--effort", "ultra"]))).toThrow(
-      "unsupported model or effort: codex:gpt-6-astra@ultra"
-    );
-    expect(() => parseArgs(argv(["--provider", "claude", "--model", "gpt-5.6-sol"]))).toThrow(
-      "unsupported model or effort: claude:gpt-5.6-sol@max"
-    );
-    expect(() => parseArgs(argv(["--provider", "claude", "--model", "claude-fable-5"]))).toThrow(
-      "unsupported model or effort: claude:claude-fable-5@max"
-    );
-    expect(() => parseArgs(argv(["--provider", "claude", "--model", "claude-opus-5", "--effort", "ultra"]))).toThrow(
-      "unsupported model or effort: claude:claude-opus-5@ultra"
-    );
-    expect(() => parseArgs(argv(["--provider", "codex", "--model", "gpt-5.6-luna", "--effort", "ultra"]))).toThrow(
-      "unsupported model or effort: codex:gpt-5.6-luna@ultra"
-    );
+  it("rejects malformed provider, model, effort, and same-provider routes", () => {
+    expect(() => parseArgs(argv(["--provider", "other"]))).toThrow("provider must be one of");
+    expect(() => parseArgs(argv(["--model", "unsafe model"]))).toThrow("invalid model slug");
+    expect(() => parseArgs(argv(["--model", "../escape"]))).toThrow("invalid model slug");
+    expect(() => parseArgs(argv(["--effort", "infinite"]))).toThrow("effort must be one of");
+    expect(() => parseArgs(argv(["--parent", "codex"]))).toThrow("native to parent");
+    expect(parseArgs(argv(["--model", "new-model.2027", "--effort", "ultra"]))?.effort).toBe("ultra");
   });
 });

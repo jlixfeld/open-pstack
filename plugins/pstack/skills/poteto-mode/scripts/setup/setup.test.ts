@@ -3,10 +3,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { prepareSetup } from "./engine.ts";
 import { commitSetup, type SetupFilesystem } from "./transaction.ts";
+import { parseManifest } from "../routing/manifest.ts";
 
 const manifestMarkdown = readFileSync(join(import.meta.dir, "../../references/provider-dispatch.md"), "utf8");
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+const fullSheet = parseManifest(manifestMarkdown).roles.map((role) => `${role.name}: inherit-parent`).join("\n") + "\n";
+const legacySheet = fullSheet.replace("feature implementation: inherit-parent\nrefactoring implementation: inherit-parent\n", "feature, refactoring: codex:gpt-6.1-sol@high\n");
 
 class FakeFilesystem implements SetupFilesystem {
   readonly files = new Map<string, Uint8Array>();
@@ -36,7 +39,7 @@ class FakeFilesystem implements SetupFilesystem {
 }
 
 function prepared(parent: "claude" | "codex" = "codex") {
-  const fs = new FakeFilesystem([{ path: "sheet", text: "feature, refactoring: codex:gpt-6.1-sol@high\n" }, { path: "integration", text: "old\n" }]);
+  const fs = new FakeFilesystem([{ path: "sheet", text: legacySheet }, { path: "integration", text: "old\n" }]);
   return {
     fs,
     value: prepareSetup({
@@ -53,11 +56,23 @@ function passed(value: ReturnType<typeof prepareSetup>) {
 }
 
 describe("prepare setup", () => {
+  it("previews a Claude-only explicit map without a Codex descriptor", () => {
+    const value = prepareSetup({
+      parent: "claude",
+      manifestMarkdown,
+      sheet: { path: "sheet", bytes: encoder.encode(fullSheet.replace("feature implementation: inherit-parent", "feature implementation: claude:claude-opus-5-5@high")) },
+      integration: { path: "integration", bytes: null },
+    });
+    expect(value.preview[0]).toBe("feature implementation [1]: claude:claude-opus-5-5@high (native)");
+    expect(value.probes.map((lane) => `${lane.provider}:${lane.model}@${lane.effort}`)).toEqual(["claude:claude-opus-5-5@high"]);
+    expect(value.preview.every((line) => !line.includes("(external)"))).toBe(true);
+  });
+
   it("recognizes only exact Claude include lines", () => {
     const make = (integration: string | null) => prepareSetup({
       parent: "claude",
       manifestMarkdown,
-      sheet: { path: "sheet", bytes: null },
+      sheet: { path: "sheet", bytes: encoder.encode(fullSheet) },
       integration: { path: "integration", bytes: integration === null ? null : encoder.encode(integration) },
     });
     expect(decoder.decode(make(null).targets[1].nextBytes)).toBe("@sheet\n");
@@ -70,7 +85,7 @@ describe("prepare setup", () => {
     const value = prepareSetup({
       parent: "claude",
       manifestMarkdown,
-      sheet: { path: "/Users/operator/.claude/pstack-models.md", bytes: null },
+      sheet: { path: "/Users/operator/.claude/pstack-models.md", bytes: encoder.encode(fullSheet) },
       sheetAliases: ["/Users/operator/.claude/pstack-models.md", "~/.claude/pstack-models.md"],
       integration: { path: "/Users/operator/.claude/CLAUDE.md", bytes: encoder.encode("before\n@~/.claude/pstack-models.md\n") },
     });
@@ -81,7 +96,7 @@ describe("prepare setup", () => {
     const make = (integration: string) => prepareSetup({
       parent: "codex",
       manifestMarkdown,
-      sheet: { path: "sheet", bytes: null },
+      sheet: { path: "sheet", bytes: encoder.encode(fullSheet) },
       integration: { path: "integration", bytes: encoder.encode(integration) },
     });
     expect(decoder.decode(make("before\n<!-- pstack:models:begin -->\nold\n<!-- pstack:models:end -->\nafter\n").targets[1].nextBytes)).toContain("before\n<!-- pstack:models:begin -->\n# pstack model configuration");
@@ -93,7 +108,7 @@ describe("prepare setup", () => {
     const { value } = prepared();
     expect(value.preview[0]).toBe("feature implementation [1]: codex:gpt-6.1-sol@high (native)");
     expect(value.preview.some((line) => line.includes("arena cross-judge pool [1]"))).toBe(true);
-    expect(value.probes.map((probe) => `${probe.provider}:${probe.model}@${probe.effort}`)).toContain("codex:gpt-6-astra@xhigh");
+    expect(value.probes.map((probe) => `${probe.provider}:${probe.model}@${probe.effort}`)).toEqual(["codex:gpt-6.1-sol@high"]);
     expect(value.targets[0].nextBytes).not.toEqual(value.targets[0].bytes);
   });
 
@@ -134,13 +149,14 @@ describe("prepare setup", () => {
   it("removes newly created targets while restoring existing targets after failures", () => {
     for (const initial of [
       [{ path: "integration", text: "old\n" }],
-      [{ path: "sheet", text: "feature implementation: codex:gpt-6.1-sol@high\n" }],
+      [{ path: "sheet", text: fullSheet }],
     ]) {
       const fs = new FakeFilesystem(initial);
       const value = prepareSetup({
         parent: "codex",
         manifestMarkdown,
         sheet: { path: "sheet", bytes: fs.read("sheet") },
+        edits: fs.read("sheet") === null ? parseManifest(manifestMarkdown).roles.map((role) => ({ role: role.name, lanes: ["inherit-parent" as const] })) : [],
         integration: { path: "integration", bytes: fs.read("integration") },
       });
       const beforeSheet = fs.value("sheet");
@@ -158,6 +174,7 @@ describe("prepare setup", () => {
       parent: "codex",
       manifestMarkdown,
       sheet: { path: "sheet", bytes: null },
+      edits: parseManifest(manifestMarkdown).roles.map((role) => ({ role: role.name, lanes: ["inherit-parent" as const] })),
       integration: { path: "integration", bytes: fs.read("integration") },
     });
     fs.failWriteCreates = { path: "sheet", text: "external actor\n" };

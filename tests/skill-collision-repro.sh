@@ -62,19 +62,18 @@ fi
 setup="$repo/plugins/pstack/skills/setup-pstack/SKILL.md"
 dispatch="$repo/plugins/pstack/skills/poteto-mode/references/provider-dispatch.md"
 route_bad=""
-grep -Fq '| feature implementation | single | codex:gpt-6.1-sol@high |' "$dispatch" || route_bad="missing GPT-6.1 Sol feature role"$'\n'
-grep -Fq '| refactoring implementation | single | codex:gpt-6-luna@high |' "$dispatch" || route_bad="missing GPT-6 Luna refactoring role"$'\n'
+grep -Fq '| feature implementation | single |' "$dispatch" || route_bad="missing feature role"$'\n'
+grep -Fq '| refactoring implementation | single |' "$dispatch" || route_bad="missing refactoring role"$'\n'
 grep -Fq '| arena cross-judge pool | pool |' "$dispatch" || route_bad="cross-judge is not a pool"$'\n'
-grep -Fq 'feature implementation: codex:gpt-6.1-sol@high' "$setup" || route_bad="setup misses split feature role"$'\n'
-grep -Fq 'refactoring implementation: codex:gpt-6-luna@high' "$setup" || route_bad="setup misses split refactoring role"$'\n'
-grep -Fq 'Apply the selected budget effort to every real' "$setup" || route_bad="setup budget does not cover customized descriptors"$'\n'
-grep -Fq 'The exact efforts' "$setup" || route_bad="setup does not define the durable budget record"$'\n'
+grep -Fq 'Ask the operator to assign each missing role explicitly' "$setup" || route_bad="setup does not require missing role assignments"$'\n'
+grep -Fq 'Offer no first-run values' "$setup" || route_bad="setup may seed defaults"$'\n'
+if grep -Fq 'First-run lanes' "$dispatch"; then route_bad="registry still assigns models"$'\n'; fi
 if [ -n "$route_bad" ]; then
-  note "FAIL: the routing registry and setup example drifted:"
+  note "FAIL: the routing registry and setup contract drifted:"
   note "$route_bad"
   fail=1
 else
-  note "ok: routing registry and setup example preserve the split roles and pool"
+  note "ok: routing registry is shape-only and setup requires explicit assignments"
 fi
 
 monitor="$repo/.github/workflows/cursor-pstack-monitor.yml"
