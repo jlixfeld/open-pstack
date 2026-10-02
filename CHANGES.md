@@ -2,13 +2,13 @@
 
 This port applies the Cursor → Claude Code substitutions in skill bodies. Earlier drafts left them flagged; this revision resolves them. A later pass added a Codex build that shares the same skills; see [Codex port](#codex-port) below.
 
-## Unreleased personal model routing
+## 1.6.0 requires personal model maps
 
 PStack now requires every workflow role to be assigned in the current harness's personal model sheet. The plugin role registry keeps names and shapes only. Setup reports every missing role and accepts only explicit edits, including on first run and after an upgrade adds a role. Existing complete sheets preserve their chosen descriptors, aliases, panel order, and repeats. Setup still probes the exact final map and writes the personal sheet and harness integration transactionally. Workflow skills no longer carry concrete model fallbacks. The external runner validates safe route syntax and passes exact selections to the provider CLI; it has no bundled model-name catalog.
 
-The preceding GPT-6.1 Sol configuration remains part of the 1.5.0 history below; it is no longer an active first-run assignment.
+The GPT-6.1 Sol and Cursor 0.15.5 sync below are included in this release. GPT-6.1 Sol remains available to existing personal maps, but the plugin no longer owns an active first-run assignment.
 
-## Earlier unreleased GPT-6.1 Sol configuration
+### GPT-6.1 Sol and Cursor 0.15.5 sync
 
 The active Sol family now uses GPT-6.1 Sol for feature implementation and the
 Sol lanes in Arena, How critics, Architect, and Interrogate. GPT-6 Astra remains
