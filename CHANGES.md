@@ -10,10 +10,10 @@ The GPT-6.1 Sol and Cursor 0.15.5 sync below are included in this release. GPT-6
 
 ### GPT-6.1 Sol and Cursor 0.15.5 sync
 
-The active Sol family now uses GPT-6.1 Sol for feature implementation and the
-Sol lanes in Arena, How critics, Architect, and Interrogate. GPT-6 Astra remains
-the choice for the most demanding and judgment-heavy roles. GPT-6 Luna remains
-the efficient choice for refactoring, exploration, and swarm work.
+The earlier configuration update selected GPT-6.1 Sol for feature implementation
+and Sol lanes in Arena, How critics, Architect, and Interrogate, alongside
+GPT-6 Astra and GPT-6 Luna. Those selections are historical configuration choices;
+this release requires operators to choose every assignment in their personal map.
 
 The runner still accepts GPT-6 Sol for immutable existing lanes and receipts.
 Setup does not rewrite saved model sheets implicitly. Operators can replace a
@@ -26,7 +26,7 @@ reasoning-budget setup guidance, and the latest workflow corrections. The
 rendered role descriptors remain the single durable record of the selected
 budget. `README-UPSTREAM.md` remains a verbatim copy of the upstream README.
 
-Open Pstack keeps its provider-qualified GPT map instead of Cursor's Opus and
+Open Pstack uses personal provider-qualified maps instead of Cursor's Opus and
 Grok defaults. It also keeps the `how critics` role, MCP-native Why and Reflect
 roles, no-fallback runner contract, no elapsed-time cancellation rule, and the
 draft-until-installed-live-proof gate. Cursor-only plugin metadata and tutorial
