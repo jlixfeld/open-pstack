@@ -12,7 +12,7 @@ open-pstack tracks [Cursor's pstack](https://github.com/cursor/plugins/tree/main
 | Upstream version | `0.15.5` |
 | open-pstack version | `1.5.0` |
 
-The table above is the current Cursor sync point. Open Pstack 1.5.0 retains this 0.15.5 sync and routes active work through GPT-6 Astra, GPT-6.1 Sol, and GPT-6 Luna. `README-UPSTREAM.md` preserves its pstack README verbatim. `CHANGES.md` and `NOTICE.md` describe the adaptations and provenance.
+The table above is the current Cursor sync point. Open Pstack 1.5.0 retains this 0.15.5 sync. Active model choices come from the current harness's personal pstack model sheet. `README-UPSTREAM.md` preserves its pstack README verbatim. `CHANGES.md` and `NOTICE.md` describe the adaptations and provenance.
 
 ## Monitor baseline facts
 

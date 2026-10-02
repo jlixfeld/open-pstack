@@ -17,13 +17,8 @@ export interface RoleAssignment {
 export const ROLE_MAP_PREAMBLE = "Provider-qualified per-role choices. Read the installed pstack provider-dispatch reference before dispatching a configured role. Confirming this model sheet is standing authorization to send a pstack role's assigned source code and task context to every selected provider; do not request separate source-code egress approval for a role selected from this confirmed sheet. Every documented role remains present. `inherit-parent` and `auto` use the parent model natively and still count as one stored lane.";
 const MODEL_SLUG = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
 
-export function parseLane(value: string, manifest: Manifest): Lane {
-  const parsed = parseLaneSyntax(value);
-  if (typeof parsed === "string") return parsed;
-  const family = manifest.families.find((entry) => entry.provider === parsed.provider && entry.model === parsed.model);
-  if (family === undefined) throw new Error(`unknown descriptor family: ${value.trim()}`);
-  if (!family.efforts.includes(parsed.effort)) throw new Error(`invalid effort for ${parsed.provider}:${parsed.model}: ${parsed.effort}`);
-  return parsed;
+export function parseLane(value: string, _manifest?: Manifest): Lane {
+  return parseLaneSyntax(value);
 }
 
 function roleDefinition(manifest: Manifest, name: string): RoleDefinition {
@@ -75,14 +70,7 @@ function indexEdits(edits: readonly RoleAssignment[], manifest: Manifest): Reado
   return indexed;
 }
 
-export function defaultRoleMap(manifest: Manifest): readonly RoleAssignment[] {
-  return manifest.roles.map((role) => validateAssignment({
-    role: role.name,
-    lanes: role.firstRunLanes.map((lane) => parseLane(lane, manifest)),
-  }, manifest));
-}
-
-export function parseRoleMap(sheet: string, manifest: Manifest, edits: readonly RoleAssignment[] = []): readonly RoleAssignment[] {
+export function parseRoleMap(sheet: string, manifest: Manifest, edits: readonly RoleAssignment[] = [], requireComplete = true): readonly RoleAssignment[] {
   const editMap = indexEdits(edits, manifest);
   const rows = sheetRows(sheet);
   const assignments: RoleAssignment[] = [];
@@ -96,14 +84,17 @@ export function parseRoleMap(sheet: string, manifest: Manifest, edits: readonly 
       roleDefinition(manifest, name);
       assignments.push(validateAssignment({
         role: name,
-        lanes: row.lanes.split(",").map((lane) => editMap.has(name)
-          ? parseLaneSyntax(lane)
-          : parseLane(lane, manifest)),
+        lanes: row.lanes.split(",").map((lane) => parseLane(lane, manifest)),
       }, manifest));
     }
   }
   const byRole = new Map(assignments.map((assignment) => [assignment.role, assignment]));
-  return defaultRoleMap(manifest).map((assignment) => editMap.get(assignment.role) ?? byRole.get(assignment.role) ?? assignment);
+  const missing = manifest.roles.filter((role) => !editMap.has(role.name) && !byRole.has(role.name)).map((role) => role.name);
+  if (requireComplete && missing.length > 0) throw new Error(`missing pstack model assignments: ${missing.join(", ")}. Configure each role in the current harness model sheet or with an explicit --edit.`);
+  return manifest.roles.flatMap((role) => {
+    const assignment = editMap.get(role.name) ?? byRole.get(role.name);
+    return assignment === undefined ? [] : [assignment];
+  });
 }
 
 export function renderLane(lane: Lane): string {

@@ -131,6 +131,14 @@ describe("provider lane registry parsing", () => {
     }
   });
 
+  it("accepts a map-provided model outside any bundled model list", async () => {
+    const { directory, registered } = await fixture();
+    const changed = copy(registered);
+    changed.lanes[0].spec.model = "claude-new.2027";
+    changed.lanes[0].spec.laneFingerprint = laneFingerprint(changed.lanes[0].spec, changed.lanes[0].spec.promptSha256);
+    expect(parseLaneRegistry(changed, directory, UNIT_IDS)).toEqual(changed);
+  });
+
   it("rejects corrupt roots, duplicate lanes, unsafe ids, enums, policy, and fingerprints", async () => {
     const { directory, store, registered } = await fixture();
     const cases: Array<readonly [string, (value: any) => unknown]> = [
@@ -167,8 +175,8 @@ describe("provider lane registry parsing", () => {
         value.lanes[0].spec.mode = "write-anywhere";
         return value;
       }],
-      ["bad model route", (value) => {
-        value.lanes[0].spec.model = "gpt-5.6-sol";
+      ["bad model slug", (value) => {
+        value.lanes[0].spec.model = "unsafe model";
         return value;
       }],
       ["same-provider route", (value) => {

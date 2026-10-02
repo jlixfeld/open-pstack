@@ -1,10 +1,11 @@
 import { existsSync, statSync } from "node:fs";
-import type { Effort, RunnerOptions } from "./types.ts";
-import { MODEL_EFFORTS, UsageError } from "./types.ts";
+import type { RunnerOptions } from "./types.ts";
+import { EFFORTS, PARENTS, PROVIDERS, UsageError } from "./types.ts";
 
 export const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 export const SAFE_LANE_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 export const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+export const MODEL_SLUG_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
 
 export function isNonNegativeSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
@@ -20,12 +21,6 @@ type RunnerRoute = Pick<
 > & {
   readonly managed: boolean;
 };
-
-function supportedEfforts(provider: string, model: string): readonly Effort[] | null {
-  const key = `${provider}:${model}`;
-  const entry = Object.entries(MODEL_EFFORTS).find(([candidate]) => candidate === key);
-  return entry?.[1] ?? null;
-}
 
 export function validateSafeId(value: string, label: string): string {
   if (!SAFE_ID_PATTERN.test(value)) {
@@ -56,12 +51,10 @@ export function validateRunnerRoute(route: RunnerRoute): void {
   if (route.model.trim().length === 0) {
     throw new UsageError("model must not be empty");
   }
-  const efforts = supportedEfforts(route.provider, route.model);
-  if (efforts === null || !efforts.includes(route.effort)) {
-    throw new UsageError(
-      `unsupported model or effort: ${route.provider}:${route.model}@${route.effort}`
-    );
-  }
+  if (!MODEL_SLUG_PATTERN.test(route.model)) throw new UsageError(`invalid model slug: ${route.model}`);
+  if (!PARENTS.includes(route.parent)) throw new UsageError(`invalid parent: ${route.parent}`);
+  if (!PROVIDERS.includes(route.provider)) throw new UsageError(`invalid provider: ${route.provider}`);
+  if (!EFFORTS.includes(route.effort)) throw new UsageError(`invalid effort: ${route.effort}`);
   if (route.parent === route.provider) {
     throw new UsageError(
       `provider ${route.provider} is native to parent ${route.parent}; use the parent subagent primitive`

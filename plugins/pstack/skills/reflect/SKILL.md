@@ -7,7 +7,7 @@ description: Spawn three parallel review subagents over the active transcript, s
 
 Mine the current conversation for durable learnings, then route them into skill edits.
 
-**Dispatch contract.** Resolve every configured role through [`provider-dispatch.md`](../poteto-mode/references/provider-dispatch.md). Reviewers need the parent's live MCP surface, so the default and supported portable route is `inherit-parent` (or its `auto` alias). Pass the transcript or digest plus any required evidence paths. On Codex, resolve remaining Claude tool names via [`codex-tools.md`](../poteto-mode/references/codex-tools.md).
+**Dispatch contract.** Resolve every configured role through [`provider-dispatch.md`](../poteto-mode/references/provider-dispatch.md). Reviewers need the parent's live MCP surface; require a configured native route or explicit parent alias. Pass the transcript or digest plus any required evidence paths. On Codex, resolve remaining Claude tool names via [`codex-tools.md`](../poteto-mode/references/codex-tools.md).
 
 ## When to invoke
 
@@ -27,7 +27,7 @@ Three transcript layouts: legacy flat (`<id>.jsonl`), current nested (`<id>/<id>
 
 For each candidate, read the first JSONL line and check that `message.content[0].text` contains the conversation's opening user prompt. Take the matching path. If no path resolves, write a tight digest of the session and pass that instead.
 
-Before spawning, the parent reads the `reflect tooling, judgment, divergent, synthesizer` role line for every reviewer and the synthesizer in the current harness's pstack model sheet. If the sheet or line is missing, use `inherit-parent`. Resolve aliases natively through provider dispatch, preserving the parent's MCP access.
+Before spawning, the parent requires the `reflect tooling, judgment, divergent, synthesizer` role line for every reviewer and the synthesizer in the current harness's pstack model sheet. If the sheet or role is missing or invalid, stop before launching. Resolve explicitly configured aliases natively through provider dispatch, preserving the parent's MCP access.
 
 ### 2. Spawn three reviewers in parallel
 
@@ -35,15 +35,15 @@ Start all three read-only lanes in one fan-out phase through provider dispatch. 
 
 | Lens | Model descriptor | Prompt template |
 |---|---|---|
-| Judgment | your configured reflect-judgment choice (default `inherit-parent`) | `references/judgment-reviewer.md` |
-| Tooling | your configured reflect-tooling choice (default `inherit-parent`) | `references/tooling-reviewer.md` |
-| Divergent | your configured reflect-judgment choice (default `inherit-parent`) | `references/divergent-reviewer.md` |
+| Judgment | configured reflect role lane | `references/judgment-reviewer.md` |
+| Tooling | configured reflect role lane | `references/tooling-reviewer.md` |
+| Divergent | configured reflect role lane | `references/divergent-reviewer.md` |
 
 Pass each template verbatim, substituting the transcript path or digest where marked. Reviewers return findings in the `Agent` response body.
 
 ### 3. Synthesize
 
-Dispatch one lane using your configured reflect-judgment descriptor (default `inherit-parent`). Preserve relevant MCP access because the synthesizer spot-verifies citations. Use `references/synthesizer.md` verbatim, with each reviewer's full output inlined where marked. The synthesizer returns a structured Accepted / Rejected / Backlog list.
+Dispatch one lane using the configured reflect role descriptor. Preserve relevant MCP access because the synthesizer spot-verifies citations. Use `references/synthesizer.md` verbatim, with each reviewer's full output inlined where marked. The synthesizer returns a structured Accepted / Rejected / Backlog list.
 
 ### 4. Structural enforcement check
 

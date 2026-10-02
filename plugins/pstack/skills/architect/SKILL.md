@@ -31,7 +31,7 @@ Skip Phase A only when the work is genuinely greenfield with no surrounding syst
 
 Run the **arena** skill with the design-sketch task and the Phase A grounding artifacts. Pass `references/runner-prompt.md` as each runner's prompt. Each candidate produces a design package shaped per `references/rationale-template.md`: the caller's usage written first, then the type sketch, function signatures, module map, and prose rationale derived from it.
 
-Take the runners from the `architect runners` line in the current harness's pstack model sheet, in place of the `arena runners` line. If the sheet or that line is missing, use `codex:gpt-6-astra@high`, `codex:gpt-6.1-sol@high`. Aliases follow the provider-dispatch contract. A rejected descriptor is a named dropout, never a fallback.
+Require the `architect runners` line in the current harness's pstack model sheet, in place of the `arena runners` line. If the sheet or role is missing or invalid, stop before launching. Aliases follow the provider-dispatch contract. A rejected descriptor is a named dropout.
 
 Design it twice. Require at least two structurally distinct candidates before synthesis, even when the first looks sufficient. This is the **exhaust-the-design-space** principle skill made concrete. Whole-shape alternatives, not point fixes inside one shape.
 

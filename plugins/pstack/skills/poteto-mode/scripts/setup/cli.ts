@@ -5,8 +5,9 @@ import { basename, resolve, sep } from "node:path";
 import { prepareSetup, type Snapshot } from "./engine.ts";
 import { nodeFilesystem } from "./integration.ts";
 import { commitSetup, type ProbeResult } from "./transaction.ts";
-import { parseLane, renderLane, type RoleAssignment } from "../routing/role-map.ts";
+import { parseLane, parseRoleMap, renderLane, type RoleAssignment } from "../routing/role-map.ts";
 import { parseManifest } from "../routing/manifest.ts";
+import { resolveRoute } from "../routing/dispatch.ts";
 
 interface PlanTarget {
   readonly path: string;
@@ -245,12 +246,38 @@ export function commit(argv: readonly string[], capture: (path: string) => Snaps
   commitSetup(prepared, loadProbeResults(receiptsPath), nodeFilesystem());
 }
 
+export function resolveRole(argv: readonly string[], io: Io = defaultIo): void {
+  const parsed = options(argv);
+  known(parsed, ["parent", "manifest", "sheet", "role"]);
+  const parentValue = parent(required(parsed, "parent"));
+  const manifestPath = canonicalTarget(required(parsed, "manifest")).path;
+  const sheetPath = canonicalTarget(required(parsed, "sheet")).path;
+  const roleName = required(parsed, "role");
+  const sheetBytes = read(sheetPath);
+  if (sheetBytes === null) throw new Error(`missing pstack model sheet: ${sheetPath}. Run setup-pstack to assign every role explicitly.`);
+  const manifest = parseManifest(readFileSync(manifestPath, "utf8"));
+  const definition = manifest.roles.find((entry) => entry.name === roleName);
+  if (definition === undefined) throw new Error(`unknown pstack role: ${roleName}`);
+  const role = parseRoleMap(new TextDecoder().decode(sheetBytes), manifest, [], false).find((entry) => entry.role === roleName);
+  if (role === undefined) throw new Error(`missing pstack model assignment for role: ${roleName}. Run setup-pstack to assign it explicitly.`);
+  io.stdout(`${JSON.stringify({
+    sheet: sheetPath,
+    role: roleName,
+    shape: definition.shape,
+    lanes: role.lanes.map((lane) => ({
+      descriptor: renderLane(lane),
+      route: resolveRoute(parentValue, typeof lane === "string" ? lane : lane.provider),
+    })),
+  })}\n`);
+}
+
 export function main(argv: readonly string[], io: Io = defaultIo): number {
   try {
     const [command, ...rest] = argv;
     if (command === "prepare") prepare(rest, io);
     else if (command === "commit") commit(rest);
-    else throw new Error("usage: pstack-setup <prepare|commit> ...");
+    else if (command === "resolve") resolveRole(rest, io);
+    else throw new Error("usage: pstack-setup <prepare|commit|resolve> ...");
     return 0;
   } catch (error) {
     io.stderr(`${error instanceof Error ? error.message : String(error)}\n`);

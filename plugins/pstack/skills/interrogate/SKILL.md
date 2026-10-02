@@ -5,7 +5,7 @@ description: "Use for \"interrogate\", \"adversarial review\", \"challenge this\
 
 # Interrogate
 
-Run every reviewer in the configured list. The defaults are Astra and Sol at medium effort. Every reviewer receives the same prompt and rubric. Assess findings against concrete code paths and evidence; consensus requires multiple completed reviewers.
+Run every reviewer in the configured list. Every reviewer receives the same prompt and rubric. Assess findings against concrete code paths and evidence; consensus requires multiple completed reviewers.
 
 The deliverable is a synthesized verdict. Do NOT auto-apply changes.
 
@@ -34,12 +34,7 @@ Write one clear paragraph. Reviewers challenge whether the work achieves the int
 
 ## Step 3, Spawn Reviewers
 
-Start all reviewers in one fan-out phase. Use `interrogate reviewers` from the current harness's pstack model sheet when that role line is present, one reviewer per entry, extending or shrinking the Reviewer A/B/C/D labels below to the configured entry count; otherwise use the table defaults. Native reviewers use the parent subagent primitive. External reviewers use the launcher directly and must return a complete, model-verified receipt.
-
-| Subagent | Default model |
-|----------|---------------|
-| Reviewer A | `codex:gpt-6-astra@medium` |
-| Reviewer B | `codex:gpt-6.1-sol@medium` |
+Require `interrogate reviewers` from the current harness's pstack model sheet before launching. Stop if the sheet or role is missing or invalid. Start one reviewer per stored entry in one fan-out phase, extending or shrinking Reviewer A/B/C/D labels to the configured count. Native reviewers use the parent subagent primitive. External reviewers use the launcher directly and must return a complete, model-verified receipt.
 
 For each reviewer, route the configured descriptor with `read-only` access and a unique output/receipt path. If the descriptor is `inherit-parent` or `auto`, use the parent subagent primitive without a model override. If a provider, login, or model is unavailable, record a dropout and continue with the completed reviewers. Exit 75 with a `provider-paused` receipt is not a dropout: preserve that reviewer lane and keep synthesis incomplete under the provider-dispatch pause contract. Never pick the closest model or silently fall back; that changes the configured review contract.
 

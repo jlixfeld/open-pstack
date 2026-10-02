@@ -361,8 +361,8 @@ describe("managed provider lane registration", () => {
         model: "grok-4.6",
         effort: "xhigh",
       }],
-      ["wrong provider model", { laneId: "wrong-model", model: "gpt-5.6-sol" }],
-      ["unsupported effort", { laneId: "wrong-effort", effort: "ultra" }],
+      ["unsafe model slug", { laneId: "wrong-model", model: "unsafe model" }],
+      ["invalid effort enum", { laneId: "wrong-effort", effort: "infinite" as RegisterParams["effort"] }],
       ["missing cwd", { laneId: "missing-cwd", cwd: join(directory, "missing") }],
       ["file cwd", { laneId: "file-cwd", cwd: prompt }],
     ];

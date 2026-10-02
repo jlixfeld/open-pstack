@@ -80,7 +80,7 @@ In Codex, ask:
 Use pstack:setup-pstack to configure pstack.
 ```
 
-Setup checks the exact final role descriptors you can run, shows every parent-specific route, and asks before saving. The initial map separates feature implementation (GPT-6.1 Sol) from refactoring (GPT-6 Luna), uses GPT-6 Astra at medium effort for bug work, broad judgment, and independent review, reserves high effort for coupled performance and hillclimb work, and pairs Astra with GPT-6.1 Sol at medium effort for Arena, How critique, and Interrogate.
+Setup asks you to assign every role explicitly, checks the exact descriptors you can run, shows every parent-specific route, and asks before saving. Your choices live in `~/.claude/pstack-models.md` or `~/.codex/pstack-models.md`, outside the plugin installation. An update preserves existing choices and asks for any newly added roles.
 
 ### 2. Use poteto-mode
 
@@ -120,9 +120,9 @@ Plugin skills include `pstack:` in their name. In Claude Code, invoke a native s
 
 ## Models and token use
 
-Some pstack workflows use one model. Arena, Architect, Interrogate, and How critique run every configured OpenAI lane. Their list length sets the candidate or reviewer count, and consensus only applies when multiple completed lanes independently agree. Each model run uses the subscription and token allowance of its command-line tool.
+Some pstack workflows use one model. Arena, Architect, Interrogate, and How critique run every configured panel lane. Their list length sets the candidate or reviewer count, and consensus only applies when multiple completed lanes independently agree. Each model run uses the subscription and token allowance of its command-line tool.
 
-`setup-pstack` lets you assign an exact provider/model/effort descriptor to each role and preserve ordered panel lanes. The active map uses GPT-6 Astra, GPT-6.1 Sol, and GPT-6 Luna. Codex runs them natively; Claude Code runs them through the Codex command-line tool. `inherit-parent` and `auto` remain native, so OpenAI-only execution requires a Codex OpenAI parent. An explicit pstack request or confirmation of the disclosed model sheet authorizes the selected lanes to receive the assigned source code and task context. Open Pstack does not quietly replace a failed model with a weaker one.
+`setup-pstack` lets you assign an exact provider/model/effort descriptor to each role and preserve ordered panel lanes. PStack has no built-in model or effort assignments. A missing sheet or role stops the workflow until you configure it. Explicit `inherit-parent` and `auto` lanes run natively. Claude descriptors are native in Claude Code; Codex descriptors are native in Codex. An explicit pstack request or confirmation of the disclosed model sheet authorizes selected lanes to receive the assigned source code and task context. Open Pstack does not replace a failed model with another one.
 
 ## Claude Code and Codex
 
@@ -131,11 +131,11 @@ Both apps read the same pstack skills. Only the way they start those skills and 
 | | Claude Code | Codex |
 | --- | --- | --- |
 | Start poteto-mode | Claude loads a small startup instruction that can route non-trivial work into it. You can also run `/pstack:poteto-mode` yourself. | Ask for `pstack:poteto-mode` by name. Codex does not load the Claude startup instruction. |
-| Runs inside the app | Claude runs parent-native aliases; active GPT-6 and GPT-6.1 descriptors use the Codex CLI. | Active Astra, GPT-6.1 Sol, and Luna descriptors stay inside Codex. |
-| Other models | Immutable legacy lanes remain supported by their existing runner paths. | Immutable legacy lanes remain supported by their existing runner paths. |
+| Runs inside the app | Configured Claude descriptors and explicit parent aliases run natively. | Configured Codex descriptors and explicit parent aliases run natively. |
+| Other models | Configured cross-provider descriptors use the matching external CLI. | Configured cross-provider descriptors use the matching external CLI. |
 | Skills and workflows | Shared with Codex. | Shared with Claude Code. |
 
-The active experiment does not select Grok. Immutable legacy Grok lanes remain readable by the runner.
+Grok lanes use the external runner from either parent when explicitly configured.
 
 ## Learn from the original
 
