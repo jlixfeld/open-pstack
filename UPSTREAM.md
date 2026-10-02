@@ -10,9 +10,9 @@ open-pstack tracks [Cursor's pstack](https://github.com/cursor/plugins/tree/main
 | Path | `pstack/` |
 | Commit | `2eb7ed4613cfc8f098dfe464a23680ea44d84c5e` |
 | Upstream version | `0.15.5` |
-| open-pstack version | `1.5.0` |
+| open-pstack version | `1.6.0` |
 
-The table above is the current Cursor sync point. Open Pstack 1.5.0 retains this 0.15.5 sync. Active model choices come from the current harness's personal pstack model sheet. `README-UPSTREAM.md` preserves its pstack README verbatim. `CHANGES.md` and `NOTICE.md` describe the adaptations and provenance.
+The table above is the current Cursor sync point. Open Pstack 1.6.0 retains this 0.15.5 sync. Active model choices come from the current harness's personal pstack model sheet. `README-UPSTREAM.md` preserves its pstack README verbatim. `CHANGES.md` and `NOTICE.md` describe the adaptations and provenance.
 
 ## Monitor baseline facts
 

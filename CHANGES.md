@@ -2,18 +2,18 @@
 
 This port applies the Cursor → Claude Code substitutions in skill bodies. Earlier drafts left them flagged; this revision resolves them. A later pass added a Codex build that shares the same skills; see [Codex port](#codex-port) below.
 
-## Unreleased personal model routing
+## 1.6.0 requires personal model maps
 
 PStack now requires every workflow role to be assigned in the current harness's personal model sheet. The plugin role registry keeps names and shapes only. Setup reports every missing role and accepts only explicit edits, including on first run and after an upgrade adds a role. Existing complete sheets preserve their chosen descriptors, aliases, panel order, and repeats. Setup still probes the exact final map and writes the personal sheet and harness integration transactionally. Workflow skills no longer carry concrete model fallbacks. The external runner validates safe route syntax and passes exact selections to the provider CLI; it has no bundled model-name catalog.
 
-The preceding GPT-6.1 Sol configuration remains part of the 1.5.0 history below; it is no longer an active first-run assignment.
+The GPT-6.1 Sol and Cursor 0.15.5 sync below are included in this release. GPT-6.1 Sol remains available to existing personal maps, but the plugin no longer owns an active first-run assignment.
 
-## Earlier unreleased GPT-6.1 Sol configuration
+### GPT-6.1 Sol and Cursor 0.15.5 sync
 
-The active Sol family now uses GPT-6.1 Sol for feature implementation and the
-Sol lanes in Arena, How critics, Architect, and Interrogate. GPT-6 Astra remains
-the choice for the most demanding and judgment-heavy roles. GPT-6 Luna remains
-the efficient choice for refactoring, exploration, and swarm work.
+The earlier configuration update selected GPT-6.1 Sol for feature implementation
+and Sol lanes in Arena, How critics, Architect, and Interrogate, alongside
+GPT-6 Astra and GPT-6 Luna. Those selections are historical configuration choices;
+this release requires operators to choose every assignment in their personal map.
 
 The runner still accepts GPT-6 Sol for immutable existing lanes and receipts.
 Setup does not rewrite saved model sheets implicitly. Operators can replace a
@@ -26,7 +26,7 @@ reasoning-budget setup guidance, and the latest workflow corrections. The
 rendered role descriptors remain the single durable record of the selected
 budget. `README-UPSTREAM.md` remains a verbatim copy of the upstream README.
 
-Open Pstack keeps its provider-qualified GPT map instead of Cursor's Opus and
+Open Pstack uses personal provider-qualified maps instead of Cursor's Opus and
 Grok defaults. It also keeps the `how critics` role, MCP-native Why and Reflect
 roles, no-fallback runner contract, no elapsed-time cancellation rule, and the
 draft-until-installed-live-proof gate. Cursor-only plugin metadata and tutorial
