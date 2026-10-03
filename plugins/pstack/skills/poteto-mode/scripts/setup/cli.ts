@@ -204,10 +204,10 @@ export function prepare(
   capture: (path: string) => Snapshot = snapshot,
 ): void {
   const parsed = options(argv);
-  known(parsed, ["parent", "manifest", "sheet", "integration", "plan", "edit"]);
+  known(parsed, ["parent", "manifest", "map", "integration", "plan", "edit"]);
   const parentValue = parent(required(parsed, "parent"));
   const manifestPath = canonicalTarget(required(parsed, "manifest")).path;
-  const sheetTarget = canonicalTarget(required(parsed, "sheet"));
+  const sheetTarget = canonicalTarget(required(parsed, "map"));
   const sheetPath = sheetTarget.path;
   const integrationPath = canonicalTarget(required(parsed, "integration")).path;
   const planPath = canonicalTarget(required(parsed, "plan")).path;
@@ -248,20 +248,20 @@ export function commit(argv: readonly string[], capture: (path: string) => Snaps
 
 export function resolveRole(argv: readonly string[], io: Io = defaultIo): void {
   const parsed = options(argv);
-  known(parsed, ["parent", "manifest", "sheet", "role"]);
+  known(parsed, ["parent", "manifest", "map", "role"]);
   const parentValue = parent(required(parsed, "parent"));
   const manifestPath = canonicalTarget(required(parsed, "manifest")).path;
-  const sheetPath = canonicalTarget(required(parsed, "sheet")).path;
+  const sheetPath = canonicalTarget(required(parsed, "map")).path;
   const roleName = required(parsed, "role");
   const sheetBytes = read(sheetPath);
-  if (sheetBytes === null) throw new Error(`missing pstack model sheet: ${sheetPath}. Run setup-pstack to assign every role explicitly.`);
+  if (sheetBytes === null) throw new Error(`missing shared agent model map: ${sheetPath}. Run setup-pstack to assign every role explicitly.`);
   const manifest = parseManifest(readFileSync(manifestPath, "utf8"));
   const definition = manifest.roles.find((entry) => entry.name === roleName);
   if (definition === undefined) throw new Error(`unknown pstack role: ${roleName}`);
   const role = parseRoleMap(new TextDecoder().decode(sheetBytes), manifest, [], false).find((entry) => entry.role === roleName);
   if (role === undefined) throw new Error(`missing pstack model assignment for role: ${roleName}. Run setup-pstack to assign it explicitly.`);
   io.stdout(`${JSON.stringify({
-    sheet: sheetPath,
+    map: sheetPath,
     role: roleName,
     shape: definition.shape,
     lanes: role.lanes.map((lane) => ({

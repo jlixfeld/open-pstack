@@ -80,7 +80,7 @@ In Codex, ask:
 Use pstack:setup-pstack to configure pstack.
 ```
 
-Setup asks you to assign every role explicitly, checks the exact descriptors you can run, shows every parent-specific route, and asks before saving. Your choices live in `~/.claude/pstack-models.md` or `~/.codex/pstack-models.md`, outside the plugin installation. An update preserves existing choices and asks for any newly added roles.
+Setup asks you to assign every role explicitly, checks the exact descriptors you can run, shows every parent-specific route, and asks before saving. Your choices live in `~/.claude/agent-model-map.md` or `~/.codex/agent-model-map.md`, outside the plugin installation. An update preserves existing choices and asks for any newly added roles.
 
 ### 2. Use poteto-mode
 
@@ -122,7 +122,7 @@ Plugin skills include `pstack:` in their name. In Claude Code, invoke a native s
 
 Some pstack workflows use one model. Arena, Architect, Interrogate, and How critique run every configured panel lane. Their list length sets the candidate or reviewer count, and consensus only applies when multiple completed lanes independently agree. Each model run uses the subscription and token allowance of its command-line tool.
 
-`setup-pstack` lets you assign an exact provider/model/effort descriptor to each role and preserve ordered panel lanes. PStack has no built-in model or effort assignments. A missing sheet or role stops the workflow until you configure it. Explicit `inherit-parent` and `auto` lanes run natively. Claude descriptors are native in Claude Code; Codex descriptors are native in Codex. An explicit pstack request or confirmation of the disclosed model sheet authorizes selected lanes to receive the assigned source code and task context. Open Pstack does not replace a failed model with another one.
+`setup-pstack` lets you assign an exact provider/model/effort descriptor to each role and preserve ordered panel lanes. PStack has no built-in model or effort assignments. A missing sheet or role stops the workflow until you configure it. Explicit `inherit-parent` and `auto` lanes run natively. Claude descriptors are native in Claude Code; Codex descriptors are native in Codex. An explicit pstack request or confirmation of the disclosed agent model map authorizes selected lanes to receive the assigned source code and task context. Open Pstack does not replace a failed model with another one.
 
 ## Claude Code and Codex
 

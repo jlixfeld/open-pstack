@@ -7,7 +7,9 @@ description: Configure the current harness's personal pstack role-to-model map. 
 
 Read [`provider-dispatch.md`](../poteto-mode/references/provider-dispatch.md). Its role registry defines required names and shapes. Only the current harness's personal sheet supplies model and effort assignments. Do not infer a model, effort, or alias from the plugin, another harness, or an absent row.
 
-Claude Code uses `~/.claude/pstack-models.md` and includes it from `~/.claude/CLAUDE.md` with `@~/.claude/pstack-models.md`. Codex uses `~/.codex/pstack-models.md` and mirrors its exact bytes between `<!-- pstack:models:begin -->` and `<!-- pstack:models:end -->` in `~/.codex/AGENTS.md`. These paths are outside the plugin installation and survive plugin updates. Do not copy a sheet between harnesses without probing from the destination parent.
+Claude Code uses `~/.claude/agent-model-map.md` and includes it from `~/.claude/CLAUDE.md` with `@~/.claude/agent-model-map.md`. Codex uses `~/.codex/agent-model-map.md` and mirrors its exact bytes between `<!-- agent:model-map:begin -->` and `<!-- agent:model-map:end -->` in `~/.codex/AGENTS.md`. These paths are outside the plugin installation and survive plugin updates. Do not copy a sheet between harnesses without probing from the destination parent.
+
+When upgrading an existing installation, rename `pstack-models.md` to `agent-model-map.md` before setup. In Claude, replace the old include path. In Codex, rename both `pstack:models` marker names to `agent:model-map`. Setup fails closed while legacy markers remain so it cannot append a second assignment block.
 
 ## Configure
 
@@ -20,7 +22,7 @@ Claude Code uses `~/.claude/pstack-models.md` and includes it from `~/.claude/CL
    pstack-setup prepare \
      --parent <claude|codex> \
      --manifest <installed provider-dispatch.md> \
-     --sheet <current parent model sheet> \
+     --map <current parent agent model map> \
      --integration <current parent instruction file> \
      --plan <unique private temporary plan.json> \
      [--edit "<role>=<lane>[,<lane>...]"]...

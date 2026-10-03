@@ -27,7 +27,7 @@ Three transcript layouts: legacy flat (`<id>.jsonl`), current nested (`<id>/<id>
 
 For each candidate, read the first JSONL line and check that `message.content[0].text` contains the conversation's opening user prompt. Take the matching path. If no path resolves, write a tight digest of the session and pass that instead.
 
-Before spawning, the parent requires the `reflect tooling, judgment, divergent, synthesizer` role line for every reviewer and the synthesizer in the current harness's pstack model sheet. If the sheet or role is missing or invalid, stop before launching. Resolve explicitly configured aliases natively through provider dispatch, preserving the parent's MCP access.
+Before spawning, the parent requires the `reflect tooling, judgment, divergent, synthesizer` role line for every reviewer and the synthesizer in the current harness's shared agent model map. If the sheet or role is missing or invalid, stop before launching. Resolve explicitly configured aliases natively through provider dispatch, preserving the parent's MCP access.
 
 ### 2. Spawn three reviewers in parallel
 

@@ -6,10 +6,10 @@ pstack model choices are provider-qualified descriptors:
 <provider>:<model>@<effort>
 ```
 
-The current harness's personal model sheet is the only source of model and effort assignments. Setup accepts descriptor syntax, then probes each exact selection on its resolved route before writing. The external runner validates route structure and passes the selected model and effort to the provider CLI. Provider execution establishes availability; failures name the selected route. A role with no assignment cannot launch. Before launching a workflow role, resolve it with the installed `pstack-setup` CLI:
+The current harness's personal agent model map is the only source of model and effort assignments. Setup accepts descriptor syntax, then probes each exact selection on its resolved route before writing. The external runner validates route structure and passes the selected model and effort to the provider CLI. Provider execution establishes availability; failures name the selected route. A role with no assignment cannot launch. Before launching a workflow role, resolve it with the installed `pstack-setup` CLI:
 
 ```text
-pstack-setup resolve --parent <claude|codex> --manifest <installed provider-dispatch.md> --sheet <current harness pstack-models.md> --role "<registry role>"
+pstack-setup resolve --parent <claude|codex> --manifest <installed provider-dispatch.md> --map <current harness agent-model-map.md> --role "<registry role>"
 ```
 
 The read-only result gives the exact stored descriptor and route for every ordered lane. Missing sheets, the requested role, or malformed rows fail with exit 64. A newly added, unrelated role does not block an existing configured workflow; setup still requires a complete map before writing. Do not launch any lane after a resolution failure.
@@ -44,9 +44,9 @@ Panels run every stored lane independently and in order. The judge pool chooses 
 
 ## Authorization boundary
 
-Either an explicit user invocation of a pstack workflow or an operator-confirmed model sheet that contains this provider disclosure is standing authorization. The authorization lets the parent harness send the assigned prompt, repository source code, diffs, and necessary task context to every agent pstack selects. This applies to every supported pstack parent, including Claude Code and Codex; to Claude, Codex, Grok, and any future configured provider; and to native and external lanes. The provider network transmission required for the dispatch is included. Do not request separate source-code egress approval for a lane covered by either authorization source.
+Either an explicit user invocation of a pstack workflow or an operator-confirmed agent model map that contains this provider disclosure is standing authorization. The authorization lets the parent harness send the assigned prompt, repository source code, diffs, and necessary task context to every agent pstack selects. This applies to every supported pstack parent, including Claude Code and Codex; to Claude, Codex, Grok, and any future configured provider; and to native and external lanes. The provider network transmission required for the dispatch is included. Do not request separate source-code egress approval for a lane covered by either authorization source.
 
-Automatic SessionStart routing is not authorization by itself. If the user did not invoke pstack explicitly and no operator-confirmed model sheet supplies the authorization, request source-code egress approval before dispatching a cross-provider lane.
+Automatic SessionStart routing is not authorization by itself. If the user did not invoke pstack explicitly and no operator-confirmed agent model map supplies the authorization, request source-code egress approval before dispatching a cross-provider lane.
 
 The authorization is scoped to the selected task. It does not permit credential export, unrelated disclosure, unrelated network destinations, or writes beyond the lane's assigned access mode. Authentication and local privilege escalation remain separate boundaries.
 

@@ -18,8 +18,8 @@ describe("personal role map", () => {
   });
 
   it("requires every role and never inserts an alias or model", () => {
-    expect(() => parseRoleMap("", manifest)).toThrow("missing pstack model assignments: feature implementation");
-    expect(() => parseRoleMap("feature implementation: inherit-parent\n", manifest)).toThrow("missing pstack model assignments: refactoring implementation");
+    expect(() => parseRoleMap("", manifest)).toThrow("missing shared agent model assignments: feature implementation");
+    expect(() => parseRoleMap("feature implementation: inherit-parent\n", manifest)).toThrow("missing shared agent model assignments: refactoring implementation");
     const roles = parseRoleMap(complete("inherit-parent"), manifest);
     expect(roles).toHaveLength(manifest.roles.length);
     expect(roles.every((role) => role.lanes.length === 1 && role.lanes[0] === "inherit-parent")).toBe(true);
