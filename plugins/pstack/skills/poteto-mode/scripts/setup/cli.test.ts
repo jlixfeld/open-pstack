@@ -15,7 +15,7 @@ function fixture() {
   directories.push(directory);
   const paths = {
     manifest: join(directory, "provider-dispatch.md"),
-    sheet: join(directory, "pstack-models.md"),
+    sheet: join(directory, "agent-model-map.md"),
     integration: join(directory, "AGENTS.md"),
     plan: join(directory, "plan.json"),
     probes: join(directory, "probes.json"),
@@ -27,7 +27,7 @@ function fixture() {
 }
 
 function prepareArgs(paths: ReturnType<typeof fixture>, edits: readonly string[] = []): string[] {
-  return ["prepare", "--parent", "codex", "--manifest", paths.manifest, "--sheet", paths.sheet, "--integration", paths.integration, "--plan", paths.plan, ...edits.flatMap((edit) => ["--edit", edit])];
+  return ["prepare", "--parent", "codex", "--manifest", paths.manifest, "--map", paths.sheet, "--integration", paths.integration, "--plan", paths.plan, ...edits.flatMap((edit) => ["--edit", edit])];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -53,12 +53,12 @@ afterEach(() => {
 describe("pstack-setup CLI", () => {
   it("resolves only stored lanes and fails closed for missing or malformed maps", () => {
     const paths = fixture();
-    const args = ["resolve", "--parent", "claude", "--manifest", paths.manifest, "--sheet", paths.sheet, "--role", "arena runners"];
+    const args = ["resolve", "--parent", "claude", "--manifest", paths.manifest, "--map", paths.sheet, "--role", "arena runners"];
     writeFileSync(paths.sheet, fullSheet.replace("arena runners: inherit-parent", "arena runners: claude:claude-opus-5-5@high, claude:claude-opus-5-5@high"));
     let output = "";
     expect(main(args, { stdout: (value) => { output += value; }, stderr: () => {} })).toBe(0);
     expect(JSON.parse(output)).toEqual({
-      sheet: paths.sheet,
+      map: paths.sheet,
       role: "arena runners",
       shape: "panel",
       lanes: [
@@ -73,20 +73,20 @@ describe("pstack-setup CLI", () => {
     rmSync(paths.sheet);
     error = "";
     expect(main(args, { stdout: () => {}, stderr: (value) => { error += value; } })).toBe(64);
-    expect(error).toContain("missing pstack model sheet");
+    expect(error).toContain("missing shared agent model map");
   });
 
   it("keeps configured workflows usable when an upgrade adds an unrelated role", () => {
     const paths = fixture();
     writeFileSync(paths.manifest, manifest.replace("| interrogate reviewers | panel |", "| interrogate reviewers | panel |\n| upgrade role | single |"));
     let output = "";
-    expect(main(["resolve", "--parent", "codex", "--manifest", paths.manifest, "--sheet", paths.sheet, "--role", "feature implementation"], {
+    expect(main(["resolve", "--parent", "codex", "--manifest", paths.manifest, "--map", paths.sheet, "--role", "feature implementation"], {
       stdout: (value) => { output += value; }, stderr: () => {},
     })).toBe(0);
     expect(JSON.parse(output).lanes).toEqual([{ descriptor: "codex:gpt-6.1-sol@high", route: "native" }]);
 
     let error = "";
-    expect(main(["resolve", "--parent", "codex", "--manifest", paths.manifest, "--sheet", paths.sheet, "--role", "upgrade role"], {
+    expect(main(["resolve", "--parent", "codex", "--manifest", paths.manifest, "--map", paths.sheet, "--role", "upgrade role"], {
       stdout: () => {}, stderr: (value) => { error += value; },
     })).toBe(64);
     expect(error).toContain("missing pstack model assignment for role: upgrade role");
@@ -99,7 +99,7 @@ describe("pstack-setup CLI", () => {
     rmSync(paths.sheet);
     let stderr = "";
     expect(main(prepareArgs(paths), { stdout: () => {}, stderr: (value) => { stderr += value; } })).toBe(64);
-    expect(stderr).toContain("missing pstack model assignments");
+    expect(stderr).toContain("missing shared agent model assignments");
     expect(stderr).toContain("feature implementation");
     expect(existsSync(paths.plan)).toBe(false);
     expect(existsSync(paths.sheet)).toBe(false);
@@ -124,9 +124,9 @@ describe("pstack-setup CLI", () => {
   });
 
   it("canonicalizes tilde and relative setup targets while preserving include aliases", () => {
-    expect(canonicalTarget("~/.claude/pstack-models.md", "/work/repo", "/Users/operator")).toEqual({
-      path: "/Users/operator/.claude/pstack-models.md",
-      aliases: ["/Users/operator/.claude/pstack-models.md", "~/.claude/pstack-models.md"],
+    expect(canonicalTarget("~/.claude/agent-model-map.md", "/work/repo", "/Users/operator")).toEqual({
+      path: "/Users/operator/.claude/agent-model-map.md",
+      aliases: ["/Users/operator/.claude/agent-model-map.md", "~/.claude/agent-model-map.md"],
     });
     expect(canonicalTarget("config/models.md", "/work/repo", "/Users/operator")).toEqual({
       path: "/work/repo/config/models.md",
@@ -148,7 +148,7 @@ describe("pstack-setup CLI", () => {
     const plan = readFileSync(paths.plan, "utf8");
     expect(stdout).toContain("how explorer [1]: codex:gpt-6-luna@high (native)");
     expect(plan).toContain('"hash"');
-    expect(plan).not.toContain("# pstack model configuration");
+    expect(plan).not.toContain("# shared agent model map");
     expect(readFileSync(paths.sheet, "utf8")).toBe(beforeSheet);
   });
 
@@ -257,7 +257,7 @@ describe("pstack-setup CLI", () => {
     const sheet = readFileSync(paths.sheet, "utf8");
     const integration = readFileSync(paths.integration, "utf8");
     expect(sheet).toContain("feature implementation: codex:gpt-6.1-sol@high");
-    expect(integration).toContain("<!-- pstack:models:begin -->");
+    expect(integration).toContain("<!-- agent:model-map:begin -->");
     expect(statSync(paths.sheet).mode & 0o777).toBe(0o640);
     expect(statSync(paths.integration).mode & 0o777).toBe(0o644);
 
@@ -271,12 +271,12 @@ describe("pstack-setup CLI", () => {
 
   it("preserves prepared Claude include aliases through commit", () => {
     const paths = fixture();
-    writeFileSync(paths.integration, "operator notes\n@~/.claude/pstack-models.md\n");
+    writeFileSync(paths.integration, "operator notes\n@~/.claude/agent-model-map.md\n");
     const args = prepareArgs(paths);
     args[args.indexOf("codex")] = "claude";
     expect(main(args, { stdout: () => {}, stderr: () => {} })).toBe(0);
     const plan = JSON.parse(readFileSync(paths.plan, "utf8"));
-    plan.sheetAliases.push("~/.claude/pstack-models.md");
+    plan.sheetAliases.push("~/.claude/agent-model-map.md");
     writeFileSync(paths.plan, `${JSON.stringify(plan, null, 2)}\n`);
     writePassingProbes(paths);
 

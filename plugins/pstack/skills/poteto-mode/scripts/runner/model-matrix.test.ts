@@ -44,8 +44,8 @@ describe("map-only routing contract", () => {
   });
 
   it("retains the existing personal paths and transactional protocol", () => {
-    expect(setup).toContain("~/.claude/pstack-models.md");
-    expect(setup).toContain("~/.codex/pstack-models.md");
+    expect(setup).toContain("~/.claude/agent-model-map.md");
+    expect(setup).toContain("~/.codex/agent-model-map.md");
     expect(setup).toContain("pstack-setup prepare");
     expect(setup).toContain("pstack-setup commit");
     expect(setup).toContain("rolls back failed writes or readbacks");

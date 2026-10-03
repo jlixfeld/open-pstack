@@ -11,7 +11,7 @@ Companion to the `how` skill. `how` answers what the code does and how it works.
 
 **Dispatch contract.** Resolve every configured role through [`provider-dispatch.md`](../poteto-mode/references/provider-dispatch.md). Investigators require the parent's live MCP surface; require a configured native route or explicit parent alias. Pass the code anchor by path. On Codex, resolve remaining Claude tool names via [`codex-tools.md`](../poteto-mode/references/codex-tools.md).
 
-Before spawning, the parent requires the `why investigators, synthesizer` role line for every investigator and the synthesizer in the current harness's pstack model sheet. If the sheet or role is missing or invalid, stop before launching. Resolve explicitly configured `auto` and `inherit-parent` natively through provider dispatch, preserving the parent's MCP access.
+Before spawning, the parent requires the `why investigators, synthesizer` role line for every investigator and the synthesizer in the current harness's shared agent model map. If the sheet or role is missing or invalid, stop before launching. Resolve explicitly configured `auto` and `inherit-parent` natively through provider dispatch, preserving the parent's MCP access.
 
 ## Operating Posture
 

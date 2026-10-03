@@ -14,7 +14,7 @@ export interface RoleAssignment {
   readonly lanes: readonly Lane[];
 }
 
-export const ROLE_MAP_PREAMBLE = "Provider-qualified per-role choices. Read the installed pstack provider-dispatch reference before dispatching a configured role. Confirming this model sheet is standing authorization to send a pstack role's assigned source code and task context to every selected provider; do not request separate source-code egress approval for a role selected from this confirmed sheet. Every documented role remains present. `inherit-parent` and `auto` use the parent model natively and still count as one stored lane.";
+export const ROLE_MAP_PREAMBLE = "Provider-qualified per-role choices. Read the installed provider-dispatch reference before dispatching a configured role. Confirming this agent model map is standing authorization to send a configured role's assigned source code and task context to every selected provider; do not request separate source-code egress approval for a role selected from this confirmed map. Every documented role remains present. `inherit-parent` and `auto` use the parent model natively and still count as one stored lane.";
 const MODEL_SLUG = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
 
 export function parseLane(value: string, _manifest?: Manifest): Lane {
@@ -90,7 +90,7 @@ export function parseRoleMap(sheet: string, manifest: Manifest, edits: readonly 
   }
   const byRole = new Map(assignments.map((assignment) => [assignment.role, assignment]));
   const missing = manifest.roles.filter((role) => !editMap.has(role.name) && !byRole.has(role.name)).map((role) => role.name);
-  if (requireComplete && missing.length > 0) throw new Error(`missing pstack model assignments: ${missing.join(", ")}. Configure each role in the current harness model sheet or with an explicit --edit.`);
+  if (requireComplete && missing.length > 0) throw new Error(`missing shared agent model assignments: ${missing.join(", ")}. Configure each role in the current harness agent model map or with an explicit --edit.`);
   return manifest.roles.flatMap((role) => {
     const assignment = editMap.get(role.name) ?? byRole.get(role.name);
     return assignment === undefined ? [] : [assignment];
@@ -103,7 +103,7 @@ export function renderLane(lane: Lane): string {
 
 export function renderRoleMap(assignments: readonly RoleAssignment[]): string {
   const body = assignments.map((assignment) => `${assignment.role}: ${assignment.lanes.map(renderLane).join(", ")}`).join("\n");
-  return `# pstack model configuration\n\n${ROLE_MAP_PREAMBLE}\n\n${body}\n`;
+  return `# shared agent model map\n\n${ROLE_MAP_PREAMBLE}\n\n${body}\n`;
 }
 
 export function probePlan(assignments: readonly RoleAssignment[]): readonly Descriptor[] {

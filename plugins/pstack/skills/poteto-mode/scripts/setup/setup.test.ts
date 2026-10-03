@@ -85,11 +85,11 @@ describe("prepare setup", () => {
     const value = prepareSetup({
       parent: "claude",
       manifestMarkdown,
-      sheet: { path: "/Users/operator/.claude/pstack-models.md", bytes: encoder.encode(fullSheet) },
-      sheetAliases: ["/Users/operator/.claude/pstack-models.md", "~/.claude/pstack-models.md"],
-      integration: { path: "/Users/operator/.claude/CLAUDE.md", bytes: encoder.encode("before\n@~/.claude/pstack-models.md\n") },
+      sheet: { path: "/Users/operator/.claude/agent-model-map.md", bytes: encoder.encode(fullSheet) },
+      sheetAliases: ["/Users/operator/.claude/agent-model-map.md", "~/.claude/agent-model-map.md"],
+      integration: { path: "/Users/operator/.claude/CLAUDE.md", bytes: encoder.encode("before\n@~/.claude/agent-model-map.md\n") },
     });
-    expect(decoder.decode(value.targets[1].nextBytes)).toBe("before\n@/Users/operator/.claude/pstack-models.md\n");
+    expect(decoder.decode(value.targets[1].nextBytes)).toBe("before\n@/Users/operator/.claude/agent-model-map.md\n");
   });
 
   it("rejects inconsistent Codex marker boundaries and replaces one exact block", () => {
@@ -99,9 +99,9 @@ describe("prepare setup", () => {
       sheet: { path: "sheet", bytes: encoder.encode(fullSheet) },
       integration: { path: "integration", bytes: encoder.encode(integration) },
     });
-    expect(decoder.decode(make("before\n<!-- pstack:models:begin -->\nold\n<!-- pstack:models:end -->\nafter\n").targets[1].nextBytes)).toContain("before\n<!-- pstack:models:begin -->\n# pstack model configuration");
-    expect(() => make("<!-- pstack:models:begin -->\n")).toThrow("inconsistent Codex pstack markers");
-    expect(() => make("<!-- pstack:models:end -->\n")).toThrow("inconsistent Codex pstack markers");
+    expect(decoder.decode(make("before\n<!-- agent:model-map:begin -->\nold\n<!-- agent:model-map:end -->\nafter\n").targets[1].nextBytes)).toContain("before\n<!-- agent:model-map:begin -->\n# shared agent model map");
+    expect(() => make("<!-- agent:model-map:begin -->\n")).toThrow("inconsistent Codex pstack markers");
+    expect(() => make("<!-- agent:model-map:end -->\n")).toThrow("inconsistent Codex pstack markers");
   });
 
   it("renders a deterministic full preview and derives probes only from the final map", () => {

@@ -2,7 +2,7 @@
 
 ## Contract
 
-PStack defines workflow roles and their shapes. The current harness's personal sheet supplies every model, effort, and alias assignment. Claude Code reads `~/.claude/pstack-models.md`; Codex reads `~/.codex/pstack-models.md`. Those paths are outside the plugin installation, so an update cannot regenerate their choices.
+PStack defines workflow roles and their shapes. The current harness's personal sheet supplies every model, effort, and alias assignment. Claude Code reads `~/.claude/agent-model-map.md`; Codex reads `~/.codex/agent-model-map.md`. Those paths are outside the plugin installation, so an update cannot regenerate their choices.
 
 The shared [`provider-dispatch.md`](../plugins/pstack/skills/poteto-mode/references/provider-dispatch.md) registry carries a role name and one shape per row. A `single` role has exactly one lane. A `panel` launches every ordered lane, including repeats. A `pool` preserves ordered alternatives while its workflow selects one. The registry contains no first-run descriptors, model families, or default efforts.
 

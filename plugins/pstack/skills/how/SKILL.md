@@ -16,7 +16,7 @@ Two modes:
 
 ## Explain Mode
 
-Before spawning, the parent requires the `how explorer` role line for each explorer and the `how explainer` role line for each explainer or synthesizer in the current harness's pstack model sheet. If the sheet or either role is missing or invalid, stop before launching. Resolve explicit aliases and unavailable descriptors through provider dispatch without substituting another model.
+Before spawning, the parent requires the `how explorer` role line for each explorer and the `how explainer` role line for each explainer or synthesizer in the current harness's shared agent model map. If the sheet or either role is missing or invalid, stop before launching. Resolve explicit aliases and unavailable descriptors through provider dispatch without substituting another model.
 
 ### Step 1. Understand the Question and Assess Complexity
 

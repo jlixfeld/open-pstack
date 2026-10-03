@@ -60,8 +60,8 @@ function integration(parent: Parent, existing: string | null, sheet: string, she
     }
     return `${existing.replace(/\s*$/, "")}\n${include}\n`;
   }
-  const begin = "<!-- pstack:models:begin -->";
-  const end = "<!-- pstack:models:end -->";
+  const begin = "<!-- agent:model-map:begin -->";
+  const end = "<!-- agent:model-map:end -->";
   const source = existing ?? "";
   const begins = source.split(begin).length - 1;
   const ends = source.split(end).length - 1;

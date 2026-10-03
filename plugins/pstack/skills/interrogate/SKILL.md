@@ -34,7 +34,7 @@ Write one clear paragraph. Reviewers challenge whether the work achieves the int
 
 ## Step 3, Spawn Reviewers
 
-Require `interrogate reviewers` from the current harness's pstack model sheet before launching. Stop if the sheet or role is missing or invalid. Start one reviewer per stored entry in one fan-out phase, extending or shrinking Reviewer A/B/C/D labels to the configured count. Native reviewers use the parent subagent primitive. External reviewers use the launcher directly and must return a complete, model-verified receipt.
+Require `interrogate reviewers` from the current harness's shared agent model map before launching. Stop if the sheet or role is missing or invalid. Start one reviewer per stored entry in one fan-out phase, extending or shrinking Reviewer A/B/C/D labels to the configured count. Native reviewers use the parent subagent primitive. External reviewers use the launcher directly and must return a complete, model-verified receipt.
 
 For each reviewer, route the configured descriptor with `read-only` access and a unique output/receipt path. If the descriptor is `inherit-parent` or `auto`, use the parent subagent primitive without a model override. If a provider, login, or model is unavailable, record a dropout and continue with the completed reviewers. Exit 75 with a `provider-paused` receipt is not a dropout: preserve that reviewer lane and keep synthesis incomplete under the provider-dispatch pause contract. Never pick the closest model or silently fall back; that changes the configured review contract.
 

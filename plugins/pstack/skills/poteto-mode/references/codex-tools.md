@@ -41,7 +41,7 @@ poteto-mode's Subagents section sets Claude-specific defaults (`subagent_type: "
 
 ## Models and providers
 
-The current harness's personal model sheet supplies every role assignment. A Codex descriptor is native under Codex; other providers use the external launcher. Setup probes each exact concrete descriptor before writing. Panels retain their configured order and the cross-judge uses its pool.
+The current harness's personal agent model map supplies every role assignment. A Codex descriptor is native under Codex; other providers use the external launcher. Setup probes each exact concrete descriptor before writing. Panels retain their configured order and the cross-judge uses its pool.
 
 ## Claude built-in skills pstack references
 
