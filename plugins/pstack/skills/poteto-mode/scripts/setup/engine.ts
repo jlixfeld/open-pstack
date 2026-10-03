@@ -63,6 +63,9 @@ function integration(parent: Parent, existing: string | null, sheet: string, she
   const begin = "<!-- agent:model-map:begin -->";
   const end = "<!-- agent:model-map:end -->";
   const source = existing ?? "";
+  if (source.includes("<!-- pstack:models:begin -->") || source.includes("<!-- pstack:models:end -->")) {
+    throw new Error("legacy pstack model markers remain; rename them to agent:model-map before setup");
+  }
   const begins = source.split(begin).length - 1;
   const ends = source.split(end).length - 1;
   if (begins !== ends || begins > 1) throw new Error("inconsistent Codex pstack markers");

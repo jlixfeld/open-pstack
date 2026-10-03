@@ -104,6 +104,17 @@ describe("prepare setup", () => {
     expect(() => make("<!-- agent:model-map:end -->\n")).toThrow("inconsistent Codex pstack markers");
   });
 
+  it("fails closed when legacy Codex model markers remain", () => {
+    const legacy = () => prepareSetup({
+      parent: "codex",
+      manifestMarkdown,
+      sheet: { path: "sheet", bytes: encoder.encode(fullSheet) },
+      integration: { path: "integration", bytes: encoder.encode("<!-- pstack:models:begin -->\nold\n<!-- pstack:models:end -->\n") },
+    });
+    expect(legacy)
+      .toThrow("legacy pstack model markers remain");
+  });
+
   it("renders a deterministic full preview and derives probes only from the final map", () => {
     const { value } = prepared();
     expect(value.preview[0]).toBe("feature implementation [1]: codex:gpt-6.1-sol@high (native)");

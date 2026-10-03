@@ -9,6 +9,8 @@ Read [`provider-dispatch.md`](../poteto-mode/references/provider-dispatch.md). I
 
 Claude Code uses `~/.claude/agent-model-map.md` and includes it from `~/.claude/CLAUDE.md` with `@~/.claude/agent-model-map.md`. Codex uses `~/.codex/agent-model-map.md` and mirrors its exact bytes between `<!-- agent:model-map:begin -->` and `<!-- agent:model-map:end -->` in `~/.codex/AGENTS.md`. These paths are outside the plugin installation and survive plugin updates. Do not copy a sheet between harnesses without probing from the destination parent.
 
+When upgrading an existing installation, rename `pstack-models.md` to `agent-model-map.md` before setup. In Claude, replace the old include path. In Codex, rename both `pstack:models` marker names to `agent:model-map`. Setup fails closed while legacy markers remain so it cannot append a second assignment block.
+
 ## Configure
 
 1. Identify the current parent harness. Read its personal sheet when present. Reject symlink-backed targets, duplicate or unknown roles, malformed descriptors, invalid lane counts, and broken integration markers. Expand a legacy `feature, refactoring` row into the two named roles without changing its lanes. Never overwrite an existing personal file with an example.
