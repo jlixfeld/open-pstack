@@ -2,6 +2,12 @@
 
 This port applies the Cursor → Claude Code substitutions in skill bodies. Earlier drafts left them flagged; this revision resolves them. A later pass added a Codex build that shares the same skills; see [Codex port](#codex-port) below.
 
+## 1.7.0 uses one shared agent model map
+
+PStack setup and resolution now use `agent-model-map.md`, the same external assignment source consumed by the evaluation harness and skill-stage adapters. The map keeps every existing role assignment and effort; PStack still owns role shapes but no concrete model fallback. Codex integration uses `agent:model-map` markers, and Claude uses the matching include path.
+
+Upgrades are explicit. Rename the old personal file and integration markers or include once before setup. Setup rejects legacy Codex markers so it cannot append a second active assignment block. The personal map remains outside the plugin installation and survives later plugin updates.
+
 ## 1.6.0 requires personal model maps
 
 PStack now requires every workflow role to be assigned in the current harness's personal model sheet. The plugin role registry keeps names and shapes only. Setup reports every missing role and accepts only explicit edits, including on first run and after an upgrade adds a role. Existing complete sheets preserve their chosen descriptors, aliases, panel order, and repeats. Setup still probes the exact final map and writes the personal sheet and harness integration transactionally. Workflow skills no longer carry concrete model fallbacks. The external runner validates safe route syntax and passes exact selections to the provider CLI; it has no bundled model-name catalog.
