@@ -389,7 +389,7 @@ else
 fi
 
 target_gate_bad=""
-for target_gate in "$repo/AGENTS.md" "$repo/UPSTREAM.md" "$repo/.github/PULL_REQUEST_TEMPLATE.md" "$opening_pr"; do
+for target_gate in "$repo/AGENTS.md" "$repo/UPSTREAM.md" "$repo/.github/pull_request_template.md" "$opening_pr"; do
   if ! grep -Fq 'active deployment target' "$target_gate"; then
     target_gate_bad="${target_gate_bad}missing active-target live gate: $target_gate"$'\n'
   fi

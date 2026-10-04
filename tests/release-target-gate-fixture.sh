@@ -8,7 +8,7 @@ copy="$scratch/candidate"
 cp -R "$repo" "$copy"
 PSTACK_STATIC_ONLY=1 "$copy/tests/skill-collision-repro.sh" >/dev/null
 
-for target in AGENTS.md UPSTREAM.md .github/PULL_REQUEST_TEMPLATE.md plugins/pstack/skills/poteto-mode/playbooks/opening-a-pr.md; do
+for target in AGENTS.md UPSTREAM.md .github/pull_request_template.md plugins/pstack/skills/poteto-mode/playbooks/opening-a-pr.md; do
   file="$copy/$target"
   cp "$file" "$scratch/original"
   sed 's/active deployment target/unsupported target/g' "$file" > "$scratch/mutated"
