@@ -10,9 +10,9 @@ open-pstack tracks [Cursor's pstack](https://github.com/cursor/plugins/tree/main
 | Path | `pstack/` |
 | Commit | `e43c7ee26e0038c6c1fa8380dd34ce86ff94cb2a` |
 | Upstream version | `0.15.9` |
-| open-pstack version | `1.7.0` |
+| open-pstack version | `1.8.0` |
 
-The table above is the current Cursor sync point. Open Pstack 1.7.0 retains this shared-map contract and is the released baseline. This source candidate advances it to Cursor 0.15.9. Package manifests remain at 1.7.0 pending release approval and installed live proof. Active model choices come from the current harness's personal agent model map. `README-UPSTREAM.md` preserves its pstack README verbatim. `CHANGES.md` and `NOTICE.md` describe the adaptations and provenance.
+The table above is the current Cursor sync point. Open Pstack 1.8.0 retains this 0.15.9 sync and the external agent model map. Active model choices come from the current harness's personal agent model map. `README-UPSTREAM.md` preserves its pstack README verbatim. `CHANGES.md` and `NOTICE.md` describe the adaptations and provenance.
 
 ## Monitor baseline facts
 
