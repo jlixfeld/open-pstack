@@ -8,17 +8,17 @@ open-pstack tracks [Cursor's pstack](https://github.com/cursor/plugins/tree/main
 | --- | --- |
 | Repository | `https://github.com/cursor/plugins.git` |
 | Path | `pstack/` |
-| Commit | `2eb7ed4613cfc8f098dfe464a23680ea44d84c5e` |
-| Upstream version | `0.15.5` |
-| open-pstack version | `1.7.0` |
+| Commit | `e43c7ee26e0038c6c1fa8380dd34ce86ff94cb2a` |
+| Upstream version | `0.15.9` |
+| open-pstack version | `1.8.0` |
 
-The table above is the current Cursor sync point. Open Pstack 1.7.0 retains this 0.15.5 sync. Active model choices come from the current harness's personal agent model map. `README-UPSTREAM.md` preserves its pstack README verbatim. `CHANGES.md` and `NOTICE.md` describe the adaptations and provenance.
+The table above is the current Cursor sync point. Open Pstack 1.8.0 retains this 0.15.9 sync and the external agent model map. Active model choices come from the current harness's personal agent model map. `README-UPSTREAM.md` preserves its pstack README verbatim. `CHANGES.md` and `NOTICE.md` describe the adaptations and provenance.
 
 ## Monitor baseline facts
 
 - The Eric port-upstream work started from `27e0ce32be3dfc496d1372a4f3d45d91d15007da`.
-- The Cursor default-branch head observed at this sync was `2eb7ed4613cfc8f098dfe464a23680ea44d84c5e`.
-- The content-sync commit remains `2eb7ed4613cfc8f098dfe464a23680ea44d84c5e`; observing a later Cursor head does **not** claim that it was backported.
+- The Cursor default-branch head observed at this sync was `e43c7ee26e0038c6c1fa8380dd34ce86ff94cb2a`.
+- The content-sync commit remains `e43c7ee26e0038c6c1fa8380dd34ce86ff94cb2a`; observing a later Cursor head does **not** claim that it was backported.
 
 The weekly monitor compares only `pstack/` and maintains one marker-owned GitHub issue when that tree drifts. See [upstream pstack monitoring](docs/upstream-pstack-monitoring.md) for the backport and port-maintenance contract.
 
@@ -40,8 +40,8 @@ The underlying manual inspection commands are:
 
 ```shell
 git fetch cursor-upstream main
-git log --oneline 2eb7ed4613cfc8f098dfe464a23680ea44d84c5e..cursor-upstream/main -- pstack
-git diff --stat 2eb7ed4613cfc8f098dfe464a23680ea44d84c5e..cursor-upstream/main -- pstack
+git log --oneline e43c7ee26e0038c6c1fa8380dd34ce86ff94cb2a..cursor-upstream/main -- pstack
+git diff --stat e43c7ee26e0038c6c1fa8380dd34ce86ff94cb2a..cursor-upstream/main -- pstack
 ```
 
 No output means the tracked pstack tree has not changed. This comparison does not need a polling service or generated mirror branch.
@@ -52,7 +52,7 @@ No output means the tracked pstack tree has not changed. This comparison does no
 2. Read each upstream pstack commit in order. Bring over its intent and content, then apply only the Claude Code and Codex substitutions documented in `CHANGES.md`.
 3. Keep one shared `plugins/pstack/skills/` tree. Put harness translation in the existing `codex-tools.md` and provider routing in `provider-dispatch.md`; do not fork a skill per harness.
 4. Update the commit and version in this file, the affected provenance rows in `NOTICE.md`, and `README-UPSTREAM.md` when upstream changes it.
-5. Run CI-equivalent checks locally, then run the installed Claude Code and Codex behavioral lanes required by the changed surface. Unit tests alone are not a release gate.
+5. Run CI-equivalent checks locally, then run the installed behavioral lanes required by the changed surface in every active deployment target. Declare those targets and record unused targets as runtime not tested; retain their static adapter checks. Unit tests alone are not a release gate.
 6. Merge the reviewed PR before tagging the next open-pstack release.
 
 ## Pull from Eric's port
