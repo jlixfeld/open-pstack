@@ -114,6 +114,8 @@ That is the main workflow. The other skills are there when poteto-mode needs the
 | `create-verification-skill` | Your project has no repeatable way for an agent to prove real behavior. |
 | `maintain-verification-skill` | The project's verification instructions no longer match the product. |
 | `babysit` | A pull request needs CI failures and review comments handled until it is ready. |
+| `correct` | Repeated agent mistakes need structural enforcement. |
+| `benchmark-checklist` | A measured speedup or regression needs evidence before reporting. |
 | `reflect` | A hard task is finished and its lessons should improve the next run. |
 
 Plugin skills include `pstack:` in their name. In Claude Code, invoke a native skill such as `/pstack:architect`. In Codex, ask for the skill, such as `Use pstack:architect for this design.` See the [technical reference](docs/reference.md) for the full list.
@@ -151,7 +153,7 @@ This repository also keeps:
 
 ## Staying close to Lauren's pstack
 
-Open Pstack 1.7.0 tracks pstack 0.15.5 at Cursor commit [`2eb7ed4613cfc8f098dfe464a23680ea44d84c5e`](https://github.com/cursor/plugins/commit/2eb7ed4613cfc8f098dfe464a23680ea44d84c5e).
+Open Pstack 1.7.0 tracks pstack 0.15.5 in the released baseline. This source candidate extends it to pstack 0.15.9 at Cursor commit [`e43c7ee26e0038c6c1fa8380dd34ce86ff94cb2a`](https://github.com/cursor/plugins/commit/e43c7ee26e0038c6c1fa8380dd34ce86ff94cb2a).
 
 The two projects have separate version numbers. The pstack version identifies Lauren's upstream content. The Open Pstack version identifies the Claude Code and Codex package built from it.
 

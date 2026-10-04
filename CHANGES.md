@@ -2,6 +2,14 @@
 
 This port applies the Cursor → Claude Code substitutions in skill bodies. Earlier drafts left them flagged; this revision resolves them. A later pass added a Codex build that shares the same skills; see [Codex port](#codex-port) below.
 
+## Pending source sync to Cursor 0.15.9
+
+Imports `23e4138`, `9511e60`, `a586282`, and `e43c7ee` in upstream order. Adds benchmark-checklist, principle-explain-the-number, and correct. Ports fresh subagents, hourly autopilot audits, concise PR headings and built-in PR tool preference, schema-first cast examples, agent-resistant architecture checks, and ordered performance mantras. The downstream plan checker and its structural tests now require the hourly cadence.
+
+Keeps the external agent-model-map.md integration, all 17 configured roles, harness mappings, no-fallback dispatch, affirmative-failure cancellation, fork-safe shipping with the existing stricter trunk-move re-verification contract, and draft-until-installed-live-proof gate. Cursor defaults, ready-by-default PRs, elapsed-runtime cancellation, Cursor plugin metadata, and Cursor guide pages are excluded. The correction workflow keeps the port's relevant-defect test criterion, including useful negative-path and relational tests. The new principle keeps the port's hidden leaf convention. The benchmark core-count command supports macOS as well as Linux.
+
+Package manifests, installed plugins, personal configuration, and frozen eval guides are unchanged. Release and installation require a later decision after the active eval campaign.
+
 ## 1.7.0 uses one shared agent model map
 
 PStack setup and resolution now use `agent-model-map.md`, the same external assignment source consumed by the evaluation harness and skill-stage adapters. The map keeps every existing role assignment and effort; PStack still owns role shapes but no concrete model fallback. Codex integration uses `agent:model-map` markers, and Claude uses the matching include path.

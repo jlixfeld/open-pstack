@@ -134,7 +134,7 @@ export const CONTRACT = Object.freeze({
   programMarkers: Object.freeze([
     "standing orders",
     "the installed plugin",
-    "30-minute",
+    "hourly",
     "status message",
   ]),
   howToReadMarkers: Object.freeze([
