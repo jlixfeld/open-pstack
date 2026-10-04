@@ -8,7 +8,7 @@ Imports `23e4138`, `9511e60`, `a586282`, and `e43c7ee` in upstream order. Adds b
 
 Keeps the external agent-model-map.md integration, all 17 configured roles, harness mappings, no-fallback dispatch, affirmative-failure cancellation, fork-safe shipping with the existing stricter trunk-move re-verification contract, and draft-until-installed-live-proof gate. Cursor defaults, ready-by-default PRs, elapsed-runtime cancellation, Cursor plugin metadata, and Cursor guide pages are excluded. The correction workflow keeps the port's relevant-defect test criterion, including useful negative-path and relational tests. The new principle keeps the port's hidden leaf convention. The benchmark core-count command supports macOS as well as Linux.
 
-The external map, personal configuration, and frozen eval guides stay intact. Installation and release follow the repository live-verification gate.
+The external map, personal configuration, and frozen eval guides stay intact. Installation and release require exact-candidate live proof on active deployment targets. Jason currently deploys Codex only; Claude adapters retain static validation, with runtime recorded as unused and not tested. Future Claude deployment requires live proof.
 
 ## 1.7.0 uses one shared agent model map
 

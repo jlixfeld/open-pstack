@@ -6,7 +6,7 @@ Cursor's `cursor/plugins/pstack` tree is the content upstream. Keep one shared s
 
 Before opening a pull request, run the Bun tests, strict typecheck, static invariants, and plugin validation.
 
-Nothing merges, tags, releases, or rolls out until the exact candidate is installed and the changed behavior passes a live test from the real user surface in every affected harness. Unit tests, validators, source inspection, and self-reports do not satisfy this gate. Record the installed version, surface, action, and observed result in the pull request template. A pull request without that evidence remains a draft.
+Nothing merges, tags, releases, or rolls out until the exact candidate is installed and the changed behavior passes a live test from the real user surface in every affected active deployment target. Unit tests, validators, source inspection, and self-reports do not satisfy this gate. Record the installed version, surface, action, and observed result in the pull request template. A pull request without that evidence remains a draft. Declare active deployment targets before validation. For Jason's current deployment, Codex is active; Claude is unused. Preserve Claude adapters and run their static checks, but record Claude runtime as not tested and do not claim live compatibility or require Claude login, installation, or model execution. A later deployment to Claude requires its own live evidence before rollout.
 
 Do not add an implicit runtime timeout or a weaker-model fallback.
 

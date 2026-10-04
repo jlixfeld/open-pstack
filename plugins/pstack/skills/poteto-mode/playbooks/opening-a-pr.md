@@ -29,7 +29,7 @@ After these sections, attach videos or screenshots when they prove a claim. Do n
 
 **Built-in PR tool.** When the run provides a built-in PR tool, create, edit, retarget, and mark ready through it, following its own instructions. Use the resolved forge for operations the tool does not cover. The installed live-proof readiness gate still applies.
 
-**Readiness.** Open a draft PR until the exact candidate is installed and the changed behavior passes a live test from every affected user harness. Record the installed version, harness, action, and observed result in the PR. Then mark it ready. Run `origin pr view <number>` or `gh pr view <number>` before you refer to PR status.
+**Readiness.** Open a draft PR until the exact candidate is installed and the changed behavior passes a live test from every affected active deployment target. Declare active deployment targets in the PR. Record the installed version, target, action, and observed result. Keep static adapter checks for unused targets and record their runtime as not tested. Do not claim live compatibility for an unused target. Then mark it ready. Run `origin pr view <number>` or `gh pr view <number>` before you refer to PR status.
 
 **Changed branch coverage.** Attach the [changed branch coverage review](../../principle-prove-it-works/references/changed-branch-coverage.md) result to the PR description. State the command, artifact, changed-branch totals, configured threshold when one exists, and every gap. If coverage is unavailable, state the attempted command and substitute verification. Coverage does not replace the live candidate evidence or real-path proof.
 
