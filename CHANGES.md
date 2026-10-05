@@ -2,6 +2,10 @@
 
 This port applies the Cursor → Claude Code substitutions in skill bodies. Earlier drafts left them flagged; this revision resolves them. A later pass added a Codex build that shares the same skills; see [Codex port](#codex-port) below.
 
+## 1.8.1 ships the Claude lane agents
+
+Restores 15 plugin-shipped Claude-native lane agents, `pstack-<stem>-<effort>` for `fable`, `opus`, and `sonnet` at `low`, `medium`, `high`, `xhigh`, and `max`. Each file pins its model and effort and denies `Agent` and `Task`; the parent decides background execution. Claude's `Agent` tool has a `model` parameter but no effort parameter, so only shipped agent files can pin effort. Release 1.0.0 shipped such agents, a later change removed them, and this release re-ships them. `provider-dispatch.md` now dispatches Claude descriptors by `subagent_type` and records a dropout when no shipped agent matches the exact model and effort. A test checks that all 15 exist and that each file's name, model, and effort agree. The personal `agent-model-map.md` remains the only configuration outside the repository.
+
 ## 1.8.0 syncs Cursor 0.15.9
 
 Imports `23e4138`, `9511e60`, `a586282`, and `e43c7ee` in upstream order. Adds benchmark-checklist, principle-explain-the-number, and correct. Ports fresh subagents, hourly autopilot audits, concise PR headings and built-in PR tool preference, schema-first cast examples, agent-resistant architecture checks, and ordered performance mantras. The downstream plan checker and its structural tests now require the hourly cadence.
