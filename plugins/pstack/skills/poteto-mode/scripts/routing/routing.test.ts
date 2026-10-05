@@ -42,6 +42,11 @@ describe("personal role map", () => {
     expect(parseRoleMap(sheet, upgraded, [], false).some((role) => role.role === "upgrade role")).toBe(false);
   });
 
+  it("ignores HTML comments, including ones containing a colon", () => {
+    const sheet = `<!-- Modified by Claude Code: note -->\n<!--\nmulti: line\n-->\n${complete("auto")}`;
+    expect(parseRoleMap(sheet, manifest).length).toBe(manifest.roles.length);
+  });
+
   it("expands a legacy combined row without altering its descriptor", () => {
     const sheet = complete("auto")
       .replace("feature implementation: auto\nrefactoring implementation: auto\n", "feature, refactoring: codex:gpt-6.1-sol@high\n");

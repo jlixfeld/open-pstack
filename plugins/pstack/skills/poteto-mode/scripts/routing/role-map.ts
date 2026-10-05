@@ -36,8 +36,17 @@ function validateAssignment(assignment: RoleAssignment, manifest: Manifest): Rol
 
 function sheetRows(sheet: string): readonly { readonly role: string; readonly lanes: string }[] {
   const rows: { role: string; lanes: string }[] = [];
+  let inComment = false;
   for (const line of sheet.split(/\r?\n/)) {
     const trimmed = line.trim();
+    if (inComment) {
+      inComment = !trimmed.includes("-->");
+      continue;
+    }
+    if (trimmed.startsWith("<!--")) {
+      inComment = !trimmed.includes("-->");
+      continue;
+    }
     if (trimmed.length === 0 || trimmed.startsWith("#") || !trimmed.includes(":")) continue;
     const delimiter = trimmed.indexOf(":");
     if (trimmed.slice(delimiter, delimiter + 2) !== ": ") throw new Error(`invalid role row: ${line}`);
