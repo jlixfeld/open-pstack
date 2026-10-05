@@ -65,7 +65,7 @@ The top-level harness resolves the route once. A child receives an assigned prov
 
 Native dispatch avoids a second CLI startup and its base context.
 
-- Claude Code: dispatch configured Claude descriptors through the native `Agent` tool with the exact model and effort when the host supports those controls. A configured alias uses the current parent settings.
+- Claude Code: dispatch a configured `claude:claude-<stem>-<version>@<effort>` descriptor through the native `Agent` tool with `subagent_type: pstack-<stem>-<effort>`, where `<stem>` is the model family in the descriptor slug (`fable`, `opus`, `sonnet`). The shipped agent file pins the model and effort, so pass no `model` override. If no shipped agent matches the exact descriptor model and effort, record a dropout: no fallback and no implicit alias. `inherit-parent` and `auto` use the parent's current model and effort and need no agent file.
 - Codex: call `spawn_agent` with the descriptor's model and `reasoning_effort`, the complete task, grounding paths, access mode, and unique output location. Use an isolated worktree for a writer. Codex subagents already run concurrently.
 
 Do not send a same-provider descriptor to the external runner. It rejects that call because the native route is cheaper and already available.
